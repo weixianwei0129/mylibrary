@@ -3,7 +3,6 @@ import os
 import cv2
 import time
 import json
-import torch
 import random
 import base64
 import shutil
@@ -19,13 +18,20 @@ from PIL import Image
 from PIL import ImageFont, ImageDraw
 from collections import defaultdict
 
+import torch
+import torch.backends.cudnn as cudnn
+from torch.utils.tensorboard import SummaryWriter
+
 random.seed(123456)
 
 
 class ONNXRunner:
     def __init__(self, path):
         import onnxruntime
-        providers = ['CoreMLExecutionProvider']  # 'CUDAExecutionProvider' 'CPUExecutionProvider'
+
+        providers = [
+            "CoreMLExecutionProvider"
+        ]  # 'CUDAExecutionProvider' 'CPUExecutionProvider'
         self.session = onnxruntime.InferenceSession(path, providers=providers)
         print("inputs: ", [x.name for x in self.session.get_inputs()])
         print("outputs: ", [x.name for x in self.session.get_outputs()])
@@ -34,7 +40,7 @@ class ONNXRunner:
         try:
             return self.session.run(
                 [x.name for x in self.session.get_outputs()],
-                {self.session.get_inputs()[0].name: img}
+                {self.session.get_inputs()[0].name: img},
             )
         except Exception as e:
             print("ONNXRunner why?: ")
@@ -44,7 +50,7 @@ class ONNXRunner:
 
 
 def calculate_md5(file_path):
-    with open(file_path, 'rb') as file:
+    with open(file_path, "rb") as file:
         md5_hash = hashlib.md5()
         while True:
             data = file.read(4096)  # 每次读取4KB数据
@@ -79,8 +85,7 @@ def pad_image(img, target=None, value=(0, 0, 0), centre=True):
         left = (t_w - width) // 2
     bottom, right = t_h - height - top, t_w - width - left
     img = cv2.copyMakeBorder(
-        img, top, bottom, left, right,
-        cv2.BORDER_CONSTANT, value=value
+        img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=value
     )
     return img, left, top
 
@@ -123,7 +128,7 @@ def size_pre_process(img, longest=1024, **kwargs):
         return None
     rw = min(rw, longest)
     rh = min(rh, longest)
-    interpolation = kwargs.get('interpolation', None)
+    interpolation = kwargs.get("interpolation", None)
     if interpolation is None:
         if rw * rh > h * w:
             interpolation = cv2.INTER_LINEAR
@@ -140,7 +145,7 @@ def get_img_base64(img, quality=100):
 
 def paint_chinese_opencv(im, text, tl, pos, color):
     img_PIL = Image.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))
-    font = ImageFont.truetype('Songti.ttc', tl)
+    font = ImageFont.truetype("Songti.ttc", tl)
     size = font.getsize(text)
 
     fillColor = color  # (255,0,0)
@@ -163,7 +168,7 @@ def get_offset_coordinates(v1, v2, v_min, v_max):
 
 def imshow(s, img, t=0):
     cv2.imshow(s, img)
-    if cv2.waitKey(t) == ord('q'):
+    if cv2.waitKey(t) == ord("q"):
         exit()
 
 
@@ -174,19 +179,21 @@ def imwrite(path, img):
 
 def is_chinese(string):
     for ch in string:
-        if u'\u4e00' <= ch <= u'\u9fff':
+        if "\u4e00" <= ch <= "\u9fff":
             return True
     return False
 
 
 def put_text(
-        im0, text, pts,
+        im0,
+        text,
+        pts,
         bg_color=None,
         text_color=None,
         tl=None,
-        chinese_font='resource/Songti.ttc'
+        chinese_font="resource/Songti.ttc",
 ):
-    x1, y1 = pts
+    x1, y1 = np.array(pts, dtype=int)
     if bg_color is None:
         bg_color = (0, 0, 0)
     if text_color is None:
@@ -265,7 +272,9 @@ def timer(func):
     def wrapper(*args, **kwargs):
         t = time.perf_counter()
         result = func(*args, **kwargs)
-        print(f'[INFO] [{func.__name__}] coast time:{(time.perf_counter() - t) * 1000:.4f}ms')
+        print(
+            f"[INFO] [{func.__name__}] coast time:{(time.perf_counter() - t) * 1000:.4f}ms"
+        )
         return result
 
     return wrapper
@@ -293,11 +302,12 @@ def xyxy2xywh(pts):
     h = np.abs(y1 - y2)
     res = np.concatenate([cx, cy, w, h], axis=1)
     res = np.clip(res, 0, np.inf)
-    return res
+    return np.squeeze(res)
 
 
 def plt2array():
     from matplotlib.backends.backend_agg import FigureCanvasAgg
+
     # 将plt转化为numpy数据
     canvas = FigureCanvasAgg(plt.gcf())
     # 绘制图像
@@ -326,12 +336,9 @@ def get_min_rect(pts):
     y_max = max(pts[:, 1])
     cx = (x_min + x_max) / 2
     cy = (y_min + y_max) / 2
-    w = (x_max - x_min)
-    h = (y_max - y_min)
-    return np.array([
-        x_min, y_min, x_max, y_max,
-        cx, cy, w, h
-    ])
+    w = x_max - x_min
+    h = y_max - y_min
+    return np.array([x_min, y_min, x_max, y_max, cx, cy, w, h])
 
 
 def clockwise_points(pts):
@@ -365,7 +372,7 @@ def move_txt_jpg(path, dst_folder, copy=True, do=False):
     prefix = os.path.splitext(path)[0]
     dirname = os.path.dirname(prefix)
     basename = os.path.basename(prefix)
-    for postfix in ['.txt', '.jpg']:
+    for postfix in [".txt", ".jpg"]:
         src = os.path.join(dirname, basename + postfix)
         dst = os.path.join(dst_folder, basename + postfix)
         if do:
@@ -381,12 +388,12 @@ def delete_txt_jpg(path, do=False):
     prefix = os.path.splitext(path)[0]
     dirname = os.path.dirname(prefix)
     basename = os.path.basename(prefix)
-    for postfix in ['.txt', '.jpg']:
+    for postfix in [".txt", ".jpg"]:
         src = os.path.join(dirname, basename + postfix)
         if do:
             os.remove(src)
         else:
-            print('delete: ', src)
+            print("delete: ", src)
 
 
 class LabelObject(object):
@@ -401,10 +408,10 @@ class LabelObject(object):
 
 
 def parse_json(path, polygon):
-    info = json.load(open(path, 'r'))
+    info = json.load(open(path, "r"))
     base64_str = info.get("imageData", None)
     if base64_str is None:
-        img = cv2.imread(path.replace('.json', '.jpg'))
+        img = cv2.imread(path.replace(".json", ".jpg"))
     else:
         img_str = base64.b64decode(base64_str)
         np_arr = np.fromstring(img_str, np.uint8)
@@ -417,10 +424,10 @@ def parse_json(path, polygon):
         image_height, image_width = img.shape[:2]
 
     obj_list = []
-    for shape in info.get('shapes', []):
+    for shape in info.get("shapes", []):
         obj = LabelObject()
         obj.label = shape.get("label", None)
-        pts = shape.get('points', [])
+        pts = shape.get("points", [])
         obj.ori_pts = np.reshape(pts, (-1, 2)).astype(int)
         if polygon and len(pts) == 2:
             x1, y1, x2, y2 = np.array(pts).flatten()
@@ -428,25 +435,27 @@ def parse_json(path, polygon):
         if not polygon and len(pts) > 3:
             pts = get_min_rect(pts).flatten()[:4]
         obj.pts = np.reshape(pts, (-1, 2))
-        obj.type = shape.get('shape_type', '')
+        obj.type = shape.get("shape_type", "")
         obj.height = image_height
         obj.width = image_width
         obj_list.append(obj)
         # =====processed=======
-        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array([image_width, image_height])
-    basename = os.path.basename(path).split('.')[0]
+        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array(
+            [image_width, image_height]
+        )
+    basename = os.path.basename(path).split(".")[0]
     return obj_list, img, basename
 
 
 def parse_json_dict(path):
     try:
-        fo = open(path, 'r')
+        fo = open(path, "r")
         info = json.load(fo)
         fo.close()
     except Exception as why:
         print("\nwhy?\n", why)
         print(f"error: {path}")
-        return [], None, ''
+        return [], None, ""
     base64_str = info.get("imageData", None)
     all_info = defaultdict(list)
     if base64_str is None:
@@ -460,17 +469,19 @@ def parse_json_dict(path):
         image_width = info.get("imageWidth", None)
     else:
         image_height, image_width = img.shape[:2]
-    for shape in info.get('shapes', []):
+    for shape in info.get("shapes", []):
         obj = LabelObject()
         obj.label = shape.get("label", None)
-        obj.pts = shape.get('points', [])
-        obj.type = shape.get('shape_type', '')
+        obj.pts = shape.get("points", [])
+        obj.type = shape.get("shape_type", "")
         obj.height = image_height
         obj.width = image_width
         # =====processed=======
-        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array([image_width, image_height])
+        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array(
+            [image_width, image_height]
+        )
         all_info[obj.label].append(obj)
-    return all_info, img, os.path.basename(path).split('.')[0]
+    return all_info, img, os.path.basename(path).split(".")[0]
 
 
 def distance(p1, p2):
@@ -522,6 +533,7 @@ def multi_process(func, need_process_data, process_method, num_thread=1):
 
 def simplify_number(decimal):
     from fractions import Fraction
+
     # 使用Fraction类将小数转换为最简分数
     fraction = Fraction(decimal).limit_denominator()
     # 打印最简分数形式
@@ -539,8 +551,20 @@ def rotate_image(angle, rect):
     def onepoint(x, y):
         # X = x*np.cos(angle) - y*np.sin(angle)-0.5*n*np.cos(angle)+0.5*m*np.sin(angle)+0.5*n
         # Y = y*np.cos(angle) + x*np.sin(angle)-0.5*n*np.sin(angle)-0.5*m*np.cos(angle)+0.5*m
-        X = x * np.cos(angle) - y * np.sin(angle) - 0.5 * n * np.cos(angle) + 0.5 * m * np.sin(angle) + 0.5 * n
-        Y = y * np.cos(angle) + x * np.sin(angle) - 0.5 * n * np.sin(angle) - 0.5 * m * np.cos(angle) + 0.5 * m
+        X = (
+                x * np.cos(angle)
+                - y * np.sin(angle)
+                - 0.5 * n * np.cos(angle)
+                + 0.5 * m * np.sin(angle)
+                + 0.5 * n
+        )
+        Y = (
+                y * np.cos(angle)
+                + x * np.sin(angle)
+                - 0.5 * n * np.sin(angle)
+                - 0.5 * m * np.cos(angle)
+                + 0.5 * m
+        )
         return [int(X), int(Y)]
 
     newrect = []
@@ -591,10 +615,15 @@ def rotate_location(angle, rect):
     return [(x0n, y0n), (x1n, y1n), (x2n, y2n), (x3n, y3n)]
 
 
-def letterbox(im, new_shape=640,
-              color=(114, 114, 114),
-              auto=True, scale_fill=False,
-              scale_up=True, stride=32):
+def letterbox(
+        im,
+        new_shape=640,
+        color=(114, 114, 114),
+        auto=True,
+        scale_fill=False,
+        scale_up=True,
+        stride=32,
+):
     # Resize and pad image while meeting stride-multiple constraints
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
@@ -623,7 +652,9 @@ def letterbox(im, new_shape=640,
         im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+    im = cv2.copyMakeBorder(
+        im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
+    )  # add border
     return im, ratio, (dw, dh)
 
 
@@ -631,13 +662,13 @@ def make_labelme_json(img, basename, shapes):
     base64_str = cv2.imencode(".jpg", img)[1]
     height, width = img.shape[:2]
     return {
-        'version': '5.2.0.post4',
-        'flags': {},
-        'shapes': shapes,
-        'imagePath': basename,
-        'imageData': base64.b64encode(base64_str).decode(),
-        'imageHeight': height,
-        'imageWidth': width
+        "version": "5.2.0.post4",
+        "flags": {},
+        "shapes": shapes,
+        "imagePath": basename,
+        "imageData": base64.b64encode(base64_str).decode(),
+        "imageHeight": height,
+        "imageWidth": width,
     }
 
 
@@ -651,11 +682,11 @@ def show_yolo_txt(path, classes=None, colors=None, thickness=2):
     img = cv2.imread(path)
     mask = np.zeros_like(img)
     height, width = img.shape[:2]
-    txt = os.path.splitext(path)[0] + '.txt'
-    with open(txt, 'r') as fo:
+    txt = os.path.splitext(path)[0] + ".txt"
+    with open(txt, "r") as fo:
         lines = fo.readlines()
     for line in lines:
-        sp = line.strip().split(' ')
+        sp = line.strip().split(" ")
         idx, cx, cy, w, h = [float(x) for x in sp]
         x1, y1, x2, y2 = (
                 xywh2xyxy([cx, cy, w, h]) * np.array([width, height, width, height])
@@ -672,10 +703,17 @@ def show_yolo_txt(path, classes=None, colors=None, thickness=2):
 # =========Warp face from insightface=======
 def estimate_norm(lmk, image_size=112):
     from skimage import transform as trans
+
     arcface_dst = np.array(
-        [[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
-         [41.5493, 92.3655], [70.7299, 92.2041]],
-        dtype=np.float32)
+        [
+            [38.2946, 51.6963],
+            [73.5318, 51.5014],
+            [56.0252, 71.7366],
+            [41.5493, 92.3655],
+            [70.7299, 92.2041],
+        ],
+        dtype=np.float32,
+    )
     assert lmk.shape == (5, 2)
     assert image_size % 112 == 0 or image_size % 128 == 0
     if image_size % 112 == 0:
@@ -712,6 +750,7 @@ def warp_face(img, x1, y1, x2, y2):
 
 def transform(data, center, output_size, scale, rotation):
     from skimage import transform as trans
+
     scale_ratio = scale
     rot = float(rotation) * np.pi / 180.0
     # translation = (output_size/2-center[0]*scale_ratio, output_size/2-center[1]*scale_ratio)
@@ -720,13 +759,10 @@ def transform(data, center, output_size, scale, rotation):
     cy = center[1] * scale_ratio
     t2 = trans.SimilarityTransform(translation=(-1 * cx, -1 * cy))
     t3 = trans.SimilarityTransform(rotation=rot)
-    t4 = trans.SimilarityTransform(translation=(output_size / 2,
-                                                output_size / 2))
+    t4 = trans.SimilarityTransform(translation=(output_size / 2, output_size / 2))
     t = t1 + t2 + t3 + t4
     M = t.params[0:2]
-    cropped = cv2.warpAffine(data,
-                             M, (output_size, output_size),
-                             borderValue=0.0)
+    cropped = cv2.warpAffine(data, M, (output_size, output_size), borderValue=0.0)
     return cropped, M
 
 
@@ -744,7 +780,7 @@ def trans_points2d(pts, M):
     new_pts = np.zeros(shape=pts.shape, dtype=np.float32)
     for i in range(pts.shape[0]):
         pt = pts[i]
-        new_pt = np.array([pt[0], pt[1], 1.], dtype=np.float32)
+        new_pt = np.array([pt[0], pt[1], 1.0], dtype=np.float32)
         new_pt = np.dot(M, new_pt)
         # print('new_pt', new_pt.shape, new_pt)
         new_pts[i] = new_pt[0:2]
@@ -758,7 +794,7 @@ def trans_points3d(pts, M):
     new_pts = np.zeros(shape=pts.shape, dtype=np.float32)
     for i in range(pts.shape[0]):
         pt = pts[i]
-        new_pt = np.array([pt[0], pt[1], 1.], dtype=np.float32)
+        new_pt = np.array([pt[0], pt[1], 1.0], dtype=np.float32)
         new_pt = np.dot(M, new_pt)
         # print('new_pt', new_pt.shape, new_pt)
         new_pts[i][0:2] = new_pt[0:2]
@@ -788,7 +824,7 @@ def pixel2d2camera3d(pt_2d, z, mtx, dist):
     x, y = (u - cx) / fx, (v - cy) / fy
 
     r = np.sqrt(x ** 2 + y ** 2)
-    k = (1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6)
+    k = 1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6
     xy = x * y
     x_distorted = x * k + 2 * p1 * xy + p2 * (r ** 2 + 2 * x ** 2)
     y_distorted = y * k + 2 * p2 * xy + p1 * (r ** 2 + 2 * y ** 2)
@@ -821,14 +857,17 @@ def pixel2d2camera3d_numpy(p_uv, z, mtx, dist):
     x, y = (u - cx) / fx, (v - cy) / fy
 
     r = np.sqrt(x ** 2 + y ** 2)
-    k = (1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6)
+    k = 1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6
     xy = x * y
     x_distorted = x * k + 2 * p1 * xy + p2 * (r ** 2 + 2 * x ** 2)
     y_distorted = y * k + 2 * p2 * xy + p1 * (r ** 2 + 2 * y ** 2)
 
-    u_distorted = (fx * x_distorted + cx)
-    v_distorted = (fy * y_distorted + cy)
-    homo_uv1 = np.stack([u_distorted, v_distorted, np.ones_like(u_distorted)], axis=1)  # [N, 3, 1]
+    u_distorted = fx * x_distorted + cx
+    v_distorted = fy * y_distorted + cy
+
+    homo_uv1 = np.stack(
+        [u_distorted, v_distorted, np.ones_like(u_distorted)], axis=1
+    )  # [N, 3, 1]
     pc_xy1 = np.matmul(np.linalg.inv(mtx), homo_uv1)[..., 0]  # [N, 3, 1]
     pc_xyz = pc_xy1 * z[:, None]  # z shape : (N, )
     return pc_xyz, z
@@ -868,36 +907,33 @@ def calibrate_single_camera(pattern, height, width, cols, rows, wk=-1):
                 print(path)
                 img = cv2.drawChessboardCorners(img, (cols, rows), corners, ret)
         if wk >= 0:
-            cv2.imshow('draw', img)
+            cv2.imshow("draw", img)
             cv2.waitKey(wk)
     print("Using...", total)
-    ret, mtx, dist, r_vecs, t_vecs = cv2.calibrateCamera(obj_points, img_points, (width, height), None, None)
+    ret, mtx, dist, r_vecs, t_vecs = cv2.calibrateCamera(
+        obj_points, img_points, (width, height), None, None
+    )
     print("CameraCalibrate:")
     print("MRS: ", ret)
     print(mtx)
     print(dist)
-    print('=' * 40)
+    print("=" * 40)
     return ret, mtx, dist
 
 
-def cal_euler(start, end):
-    dx, dy, dz = end - start
-    pitch = np.rad2deg(np.arcsin(-dy / (np.sqrt(dx ** 2 + dz ** 2 + dy ** 2) + 1e-7)))  # -dy: 向上为正
-    yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx 表示向左为正
-    return pitch, yaw
-
-
 def write_img_and_txt(basename, img, text):
-    imwrite(basename + '.png', img)
-    with open(basename + '.txt', 'w') as fo:
+    imwrite(basename + ".png", img)
+    with open(basename + ".txt", "w") as fo:
         fo.write(text)
 
 
-def draw_gaze(image, start, pitchyaw, length=40.0, thickness=1, color=(0, 0, 255), is_degree=False):
+def draw_gaze(
+        image, start, pitchyaw, length, thickness=1, color=(0, 0, 255), is_degree=False
+):
     """Draw gaze angle on given image with a given eye positions.
 
-    pitchyaw: x朝右，y朝上
-    pixel: x朝右，y朝下
+    pitchyaw: x朝右, y朝上
+    pixel: x朝右, y朝下
     """
     if is_degree:
         pitchyaw = np.deg2rad(pitchyaw)
@@ -905,11 +941,160 @@ def draw_gaze(image, start, pitchyaw, length=40.0, thickness=1, color=(0, 0, 255
     x, y = start
     if np.ndim(image) == 2:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    dx = length * np.sin(yaw)
-    dy = -length * np.tan(pitch)
+    dx = length * np.cos(pitch) * np.sin(yaw)
+    dy = -length * np.sin(pitch)
     cv2.arrowedLine(
-        image, (int(x), int(y)),
-        (int(x + dx), int(y + dy)), color,
-        thickness, cv2.LINE_AA, tipLength=0.2
+        image,
+        (int(x), int(y)),
+        (int(x + dx), int(y + dy)),
+        color,
+        thickness,
+        cv2.LINE_AA,
+        tipLength=0.2,
     )
     return image
+
+
+def gaze3dTo2d(start, end):
+    dx, dy, dz = end - start
+    pitch = np.rad2deg(
+        np.arcsin(-dy / (np.sqrt(dx ** 2 + dz ** 2 + dy ** 2) + 1e-7))
+    )  # -dy: 向上为正
+    yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx 表示向左为正
+    return pitch, yaw
+
+
+def gaze2dTo3d(pitch, yaw, is_degree=True):
+    """
+    右手定则： x朝右, y朝上, z指向相机
+    """
+    if is_degree:
+        pitch = np.deg2rad(pitch)
+        yaw = np.deg2rad(yaw)
+    pitch = np.reshape(pitch, (-1, 1))
+    yaw = np.reshape(yaw, (-1, 1))
+    batch = np.shape(pitch)[0]
+    gaze = np.zeros((batch, 3))
+    gaze[:, 0] = -np.cos(pitch) * np.sin(yaw)
+    gaze[:, 1] = -np.sin(pitch)
+    gaze[:, 2] = -np.cos(pitch) * np.cos(yaw)
+    return gaze
+
+
+def cosine_similarity_deg(a, b):
+    a = a / np.linalg.norm(a, axis=1, keepdims=True)
+    b = b / np.linalg.norm(b, axis=1, keepdims=True)
+    ab = np.sum(a * b, axis=1)
+    ab = np.clip(ab, a_min=-float("inf"), a_max=0.999999)
+    loss_rad = np.arccos(ab)  # rad
+    return np.rad2deg(loss_rad)
+
+
+# =================Train===============
+
+
+class LogHistory:
+    def __init__(self, log_dir):
+        self.log_dir = log_dir
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.losses = defaultdict(list)
+        self.writer = SummaryWriter(self.log_dir)
+        self.plt_colors = ["red", "yellow", "black", "blue"]
+
+    def add_graph(self, model, size):
+        try:
+            dummy_input = torch.randn((2, 3, size[0], size[1]))
+            self.writer.add_graph(model, dummy_input)
+        except Exception as why:
+            print("dummy model: ")
+            print(why)
+            pass
+
+    def update_info(self, info, epoch):
+        for name, value in info.items():
+            if np.isscalar(value):
+                self.add_scalar(name, value, epoch)
+            elif type(value) in [torch.Tensor]:
+                self.add_image(name, value, epoch)
+            else:
+                raise TypeError(f"{name}: {type(value)}, {value}")
+
+    def add_scalar(self, name, value, epoch):
+        self.writer.add_scalar(name, value, epoch)
+
+    def add_image(self, name, images, epoch):
+        self.writer.add_images(name, images, epoch)
+
+
+# =============Train===========
+
+def set_file_only_read(filename):
+    # 获取当前文件的权限
+    current_permissions = os.stat(filename).st_mode
+
+    # 设置文件为只读
+    os.chmod(filename, current_permissions & ~0o222)  # 将写权限（w）移除
+
+    # 检查文件权限
+    new_permissions = os.stat(filename).st_mode
+    if not new_permissions & 0o222:
+        print(f"{filename}设置为只读成功！")
+    else:
+        print(f"{filename}设置为只读失败！")
+
+
+def set_random_seed(seed=123456, deterministic=False):
+    """ Set random state to random libray, numpy, torch and cudnn.
+    Args:
+        seed: int value.
+        deterministic: bool value.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if deterministic:
+        cudnn.deterministic = True
+        cudnn.benchmark = False
+    else:
+        cudnn.deterministic = False
+        cudnn.benchmark = True
+
+
+def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
+    # YOLOv5 3-param group optimizer: 0) weights with decay, 1) weights no decay, 2) biases no decay
+    g = [], [], []  # optimizer parameter groups
+    bn = tuple(v for k, v in torch.nn.__dict__.items() if 'Norm' in k)  # normalization layers, i.e. BatchNorm2d()
+    for v in model.modules():
+        for p_name, p in v.named_parameters(recurse=0):
+            if p_name == 'bias':  # bias (no decay)
+                g[2].append(p)
+            elif p_name == 'weight' and isinstance(v, bn):  # weight (no decay)
+                g[1].append(p)
+            else:
+                g[0].append(p)  # weight (with decay)
+    if name == 'Adam':
+        optimizer = torch.optim.Adam(g[2], lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
+    elif name == 'AdamW':
+        optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
+    elif name == 'RMSProp':
+        optimizer = torch.optim.RMSprop(g[2], lr=lr, momentum=momentum)
+    elif name == 'SGD':
+        optimizer = torch.optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
+    else:
+        raise NotImplementedError(f'Optimizer {name} not implemented.')
+
+    optimizer.add_param_group({'params': g[0], 'weight_decay': decay})  # add g0 with weight_decay
+    optimizer.add_param_group({'params': g[1], 'weight_decay': 0.0})  # add g1 (BatchNorm2d weights)
+    return optimizer
+
+
+def smart_lr(warm, lr_init, lrf, epochs, cycle):
+    epochs -= 1  # last_step begin with 0
+    if cycle:
+        y1, y2 = 1.0, lrf
+        return lambda t: t / warm if t < warm else \
+            ((1 - np.cos((t - warm) / (epochs - warm) * np.pi)) / 2) * (y2 - y1) + y1
+    else:
+        lr_min = lr_init * lrf
+        return lambda x: x / warm if 0 < x < warm else \
+            (1 - (x - warm) / (epochs - warm)) * (1 - lr_min) + lr_min
