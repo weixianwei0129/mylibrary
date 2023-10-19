@@ -1,0 +1,915 @@
+import glob
+import os
+import cv2
+import time
+import json
+import torch
+import random
+import base64
+import shutil
+import hashlib
+import requests
+import numpy as np
+from io import BytesIO
+from functools import partial
+import matplotlib.pylab as plt
+from multiprocessing import Pool
+
+from PIL import Image
+from PIL import ImageFont, ImageDraw
+from collections import defaultdict
+
+random.seed(123456)
+
+
+class ONNXRunner:
+    def __init__(self, path):
+        import onnxruntime
+        providers = ['CoreMLExecutionProvider']  # 'CUDAExecutionProvider' 'CPUExecutionProvider'
+        self.session = onnxruntime.InferenceSession(path, providers=providers)
+        print("inputs: ", [x.name for x in self.session.get_inputs()])
+        print("outputs: ", [x.name for x in self.session.get_outputs()])
+
+    def run(self, img):
+        try:
+            return self.session.run(
+                [x.name for x in self.session.get_outputs()],
+                {self.session.get_inputs()[0].name: img}
+            )
+        except Exception as e:
+            print("ONNXRunner why?: ")
+            print(e)
+            print(self.session.get_inputs()[0])
+            print(img.shape)
+
+
+def calculate_md5(file_path):
+    with open(file_path, 'rb') as file:
+        md5_hash = hashlib.md5()
+        while True:
+            data = file.read(4096)  # 每次读取4KB数据
+            if not data:
+                break
+            md5_hash.update(data)
+    return md5_hash.hexdigest()
+
+
+def read_avif_img(path):
+    AVIFimg = Image.open(path)
+    img = np.array(AVIFimg)
+    return img[..., ::-1]
+
+
+def img2str(img):
+    img_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
+    base64_str = cv2.imencode(".jpg", img, img_param)[1]
+    return base64.b64encode(base64_str).decode()
+
+
+def pad_image(img, target=None, value=(0, 0, 0), centre=True):
+    height, width = img.shape[:2]
+    long_side = max(height, width)
+    if target is None:
+        t_h = t_w = long_side
+    else:
+        t_w, t_h = target
+    top, left = 0, 0
+    if centre:
+        top = (t_h - height) // 2
+        left = (t_w - width) // 2
+    bottom, right = t_h - height - top, t_w - width - left
+    img = cv2.copyMakeBorder(
+        img, top, bottom, left, right,
+        cv2.BORDER_CONSTANT, value=value
+    )
+    return img, left, top
+
+
+def divisibility(a, r=32):
+    return int(np.ceil(a / r) * r)
+
+
+def size_pre_process(img, longest=1024, **kwargs):
+    """kwargs
+    interpolation
+
+    """
+    h, w = img.shape[:2]
+    if "hard" in kwargs:
+        rw = rh = divisibility(kwargs["hard"])
+    elif "short" in kwargs:
+        short = kwargs["short"]
+        if h > w:
+            rw = short
+            rh = divisibility(h / w * rw)
+        else:
+            rh = short
+            rw = divisibility(w / h * rh)
+    elif "long" in kwargs:
+        long = kwargs["long"]
+        if h < w:
+            rw = long
+            rh = divisibility(h / w * rw)
+        else:
+            rh = long
+            rw = divisibility(w / h * rh)
+    elif "height" in kwargs:
+        rh = divisibility(kwargs["height"])
+        rw = divisibility(w / h * rh)
+    elif "width" in kwargs:
+        rw = divisibility(kwargs["width"])
+        rh = divisibility(h / w * rw)
+    else:
+        return None
+    rw = min(rw, longest)
+    rh = min(rh, longest)
+    interpolation = kwargs.get('interpolation', None)
+    if interpolation is None:
+        if rw * rh > h * w:
+            interpolation = cv2.INTER_LINEAR
+        else:
+            interpolation = cv2.INTER_AREA
+    return cv2.resize(img, (rw, rh), interpolation=interpolation)
+
+
+def get_img_base64(img, quality=100):
+    img_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    base64_str = cv2.imencode(".jpg", img, img_param)[1]
+    return base64.b64encode(base64_str).decode()
+
+
+def paint_chinese_opencv(im, text, tl, pos, color):
+    img_PIL = Image.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))
+    font = ImageFont.truetype('Songti.ttc', tl)
+    size = font.getsize(text)
+
+    fillColor = color  # (255,0,0)
+    position = pos  # (100,100)
+    draw = ImageDraw.Draw(img_PIL)
+    draw.text(position, text, font=font, fill=fillColor)
+    img = cv2.cvtColor(np.asarray(img_PIL), cv2.COLOR_RGB2BGR)
+    return img, size
+
+
+def get_offset_coordinates(v1, v2, v_min, v_max):
+    v2_add = max(0, v_min - v1)
+    v1 = max(v_min, v1)
+    v1_sub = max(0, v2 - v_max)
+    v2 = min(v_max, v2)
+    v1 -= v1_sub
+    v2 += v2_add
+    return v1, v2
+
+
+def imshow(s, img, t=0):
+    cv2.imshow(s, img)
+    if cv2.waitKey(t) == ord('q'):
+        exit()
+
+
+def imwrite(path, img):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cv2.imwrite(path, img)
+
+
+def is_chinese(string):
+    for ch in string:
+        if u'\u4e00' <= ch <= u'\u9fff':
+            return True
+    return False
+
+
+def put_text(
+        im0, text, pts,
+        bg_color=None,
+        text_color=None,
+        tl=None,
+        chinese_font='resource/Songti.ttc'
+):
+    x1, y1 = pts
+    if bg_color is None:
+        bg_color = (0, 0, 0)
+    if text_color is None:
+        text_color = (255, 255, 255)
+    h, w = im0.shape[:2]
+
+    if tl is None:
+        tl = round(0.02 * np.sqrt(im0.shape[0] ** 2 + im0.shape[1] ** 2)) + 1
+
+    font = ImageFont.load_default()
+    if is_chinese(text):
+        if not os.path.exists(chinese_font):
+            print(f"有中文, 但没有对应的字体 'resource/Songti.ttc'. ")
+        else:
+            font = ImageFont.truetype(chinese_font, tl)
+
+    tw, th = font.getsize(text)
+    x_b, x_e = get_offset_coordinates(x1, x1 + tw, 0, w)
+    y_b, y_e = get_offset_coordinates(y1 - th - 3, y1, 0, h)
+
+    c1 = x_b, y_b
+    c3 = x_e, y_e
+
+    cv2.rectangle(im0, c1, c3, bg_color, -1, cv2.LINE_AA)  # filled
+    img_pillow = Image.fromarray(cv2.cvtColor(im0, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(img_pillow)
+    draw.text(c1, text, font=font, fill=text_color)
+    im0 = cv2.cvtColor(np.asarray(img_pillow), cv2.COLOR_RGB2BGR)
+    return im0
+
+
+def download_image_from_url(image_url):
+    response = requests.get(image_url)
+    image = Image.open(BytesIO(response.content))
+    img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    return img
+
+
+def make_img_smaller(img, height):
+    if height is not None and img.shape[0] > height:
+        img = size_pre_process(img, height=height)
+    return img
+
+
+def multi_download(all_info, num_thread, func, **kwargs):
+    """
+
+    Args:
+        all_info:
+        num_thread:
+        **kwargs:
+
+    Returns:
+
+    """
+    if num_thread == 1:
+        func([0, all_info], **kwargs)
+    else:
+        begin = 0
+        total = len(all_info)
+        interval = int(np.ceil(total / num_thread))
+        end = interval
+
+        in_args = []
+        index = 0
+        while begin < total:
+            in_args.append([index, all_info[begin:end]])
+            begin += interval
+            end += interval
+            index += 1
+        pool = Pool(num_thread)
+        pool.map(partial(func, **kwargs), in_args)
+
+
+def timer(func):
+    def wrapper(*args, **kwargs):
+        t = time.perf_counter()
+        result = func(*args, **kwargs)
+        print(f'[INFO] [{func.__name__}] coast time:{(time.perf_counter() - t) * 1000:.4f}ms')
+        return result
+
+    return wrapper
+
+
+def xywh2xyxy(pts):
+    pts = np.reshape(pts, [-1, 4])
+    cx, cy, w, h = np.split(pts, 4, 1)
+    x1 = cx - w / 2
+    x2 = cx + w / 2
+    y1 = cy - h / 2
+    y2 = cy + h / 2
+    res = np.concatenate([x1, y1, x2, y2], axis=1)
+    res = np.clip(res, 0, np.inf)
+    # return res[0] if pts.shape[0] == 1 else res
+    return np.squeeze(res)
+
+
+def xyxy2xywh(pts):
+    pts = np.reshape(pts, [-1, 4])
+    x1, y1, x2, y2 = np.split(pts, 4, 1)
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+    w = np.abs(x1 - x2)
+    h = np.abs(y1 - y2)
+    res = np.concatenate([cx, cy, w, h], axis=1)
+    res = np.clip(res, 0, np.inf)
+    return res
+
+
+def plt2array():
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    # 将plt转化为numpy数据
+    canvas = FigureCanvasAgg(plt.gcf())
+    # 绘制图像
+    canvas.draw()
+    # 获取图像尺寸
+    w, h = canvas.get_width_height()
+    # 解码string 得到argb图像
+    buf = np.fromstring(canvas.tostring_argb(), dtype=np.uint8)
+
+    # 重构成w h 4(argb)图像
+    buf.shape = (w, h, 4)
+    # 转换为 RGBA
+    buf = np.roll(buf, 3, axis=2)
+    # 得到 Image RGBA图像对象 (需要Image对象的同学到此为止就可以了)
+    image = Image.frombytes("RGBA", (w, h), buf.tobytes())
+    # 转换为numpy array rgba四通道数组
+    plt.clf()
+    return np.asarray(image)
+
+
+def get_min_rect(pts):
+    pts = np.reshape(pts, (-1, 2))
+    x_min = min(pts[:, 0])
+    x_max = max(pts[:, 0])
+    y_min = min(pts[:, 1])
+    y_max = max(pts[:, 1])
+    cx = (x_min + x_max) / 2
+    cy = (y_min + y_max) / 2
+    w = (x_max - x_min)
+    h = (y_max - y_min)
+    return np.array([
+        x_min, y_min, x_max, y_max,
+        cx, cy, w, h
+    ])
+
+
+def clockwise_points(pts):
+    """
+    pts:
+     [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+    1. 先按照x进行排序,从小到大
+    2. 对前两个点,y大的为点4, 小的为点1
+    3. 对后两个点,y大的为点3, 小的为点2
+    """
+    pts = sorted(pts, key=lambda x: x[0])
+
+    if pts[1][1] > pts[0][1]:
+        index_1 = 0
+        index_4 = 1
+    else:
+        index_1 = 1
+        index_4 = 0
+
+    if pts[3][1] > pts[2][1]:
+        index_2 = 2
+        index_3 = 3
+    else:
+        index_2 = 3
+        index_3 = 2
+    return [pts[index_1], pts[index_2], pts[index_3], pts[index_4]]
+
+
+def move_txt_jpg(path, dst_folder, copy=True, do=False):
+    os.makedirs(dst_folder, exist_ok=True)
+    prefix = os.path.splitext(path)[0]
+    dirname = os.path.dirname(prefix)
+    basename = os.path.basename(prefix)
+    for postfix in ['.txt', '.jpg']:
+        src = os.path.join(dirname, basename + postfix)
+        dst = os.path.join(dst_folder, basename + postfix)
+        if do:
+            if copy:
+                shutil.copy(src, dst)
+            else:
+                shutil.move(src, dst)
+        else:
+            print(src, dst)
+
+
+def delete_txt_jpg(path, do=False):
+    prefix = os.path.splitext(path)[0]
+    dirname = os.path.dirname(prefix)
+    basename = os.path.basename(prefix)
+    for postfix in ['.txt', '.jpg']:
+        src = os.path.join(dirname, basename + postfix)
+        if do:
+            os.remove(src)
+        else:
+            print('delete: ', src)
+
+
+class LabelObject(object):
+    type = None
+    pts = None
+    ori_pts = None
+    pts_normed = None
+    label = None
+    box = None
+    height = None
+    width = None
+
+
+def parse_json(path, polygon):
+    info = json.load(open(path, 'r'))
+    base64_str = info.get("imageData", None)
+    if base64_str is None:
+        img = cv2.imread(path.replace('.json', '.jpg'))
+    else:
+        img_str = base64.b64decode(base64_str)
+        np_arr = np.fromstring(img_str, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    if img is None:
+        image_height = info.get("imageHeight", None)
+        image_width = info.get("imageWidth", None)
+    else:
+        image_height, image_width = img.shape[:2]
+
+    obj_list = []
+    for shape in info.get('shapes', []):
+        obj = LabelObject()
+        obj.label = shape.get("label", None)
+        pts = shape.get('points', [])
+        obj.ori_pts = np.reshape(pts, (-1, 2)).astype(int)
+        if polygon and len(pts) == 2:
+            x1, y1, x2, y2 = np.array(pts).flatten()
+            pts = np.array([x1, y1, x2, y1, x2, y2, x1, y2])
+        if not polygon and len(pts) > 3:
+            pts = get_min_rect(pts).flatten()[:4]
+        obj.pts = np.reshape(pts, (-1, 2))
+        obj.type = shape.get('shape_type', '')
+        obj.height = image_height
+        obj.width = image_width
+        obj_list.append(obj)
+        # =====processed=======
+        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array([image_width, image_height])
+    basename = os.path.basename(path).split('.')[0]
+    return obj_list, img, basename
+
+
+def parse_json_dict(path):
+    try:
+        fo = open(path, 'r')
+        info = json.load(fo)
+        fo.close()
+    except Exception as why:
+        print("\nwhy?\n", why)
+        print(f"error: {path}")
+        return [], None, ''
+    base64_str = info.get("imageData", None)
+    all_info = defaultdict(list)
+    if base64_str is None:
+        img = None
+    else:
+        img_str = base64.b64decode(base64_str)
+        np_arr = np.fromstring(img_str, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    if img is None:
+        image_height = info.get("imageHeight", None)
+        image_width = info.get("imageWidth", None)
+    else:
+        image_height, image_width = img.shape[:2]
+    for shape in info.get('shapes', []):
+        obj = LabelObject()
+        obj.label = shape.get("label", None)
+        obj.pts = shape.get('points', [])
+        obj.type = shape.get('shape_type', '')
+        obj.height = image_height
+        obj.width = image_width
+        # =====processed=======
+        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array([image_width, image_height])
+        all_info[obj.label].append(obj)
+    return all_info, img, os.path.basename(path).split('.')[0]
+
+
+def distance(p1, p2):
+    return np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+
+
+def warp_regions(img, box):
+    p0, p1, p2, p3 = box
+    h = int(distance(p0, p3))
+    w = int(distance(p0, p1))
+    pts1 = np.float32([p0, p1, p3])
+    pts2 = np.float32([[0, 0], [w - 1, 0], [0, h - 1]])
+    return cv2.warpAffine(img, cv2.getAffineTransform(pts1, pts2), (w, h))
+
+
+def random_color(amin, amax):
+    b = np.random.randint(amin, amax)
+    g = np.random.randint(amin, amax)
+    r = np.random.randint(amin, amax)
+    return b, g, r
+
+
+def make_color_table(number):
+    color_table = {0: (222, 0, 0), 1: (0, 0, 222), 2: (0, 222, 0)}
+    for i in range(3, number):
+        color_table[i] = random_color(127, 255)
+    return color_table
+
+
+def multi_process(func, need_process_data, process_method, num_thread=1):
+    if num_thread == 1:
+        process_method([0, need_process_data])
+    else:
+        begin = 0
+        total = len(need_process_data)
+        interval = int(np.ceil(total / num_thread))
+        end = interval
+
+        works = []
+        index = 0
+        while begin < total:
+            index += 1
+            works.append([index, need_process_data[begin:end]])
+            begin += interval
+            end += interval
+        pool = Pool(num_thread)
+        pool.map(func, works)
+
+
+def simplify_number(decimal):
+    from fractions import Fraction
+    # 使用Fraction类将小数转换为最简分数
+    fraction = Fraction(decimal).limit_denominator()
+    # 打印最简分数形式
+    # print(f"小数：{decimal}")
+    # print(f"最简分数：{fraction.numerator}/{fraction.denominator}")
+    string = f"{fraction.numerator}/{fraction.denominator}"
+    return string, fraction.numerator, fraction.denominator
+
+
+def rotate_image(angle, rect):
+    angle = angle * np.pi / 180
+    n = 1600
+    m = 1200
+
+    def onepoint(x, y):
+        # X = x*np.cos(angle) - y*np.sin(angle)-0.5*n*np.cos(angle)+0.5*m*np.sin(angle)+0.5*n
+        # Y = y*np.cos(angle) + x*np.sin(angle)-0.5*n*np.sin(angle)-0.5*m*np.cos(angle)+0.5*m
+        X = x * np.cos(angle) - y * np.sin(angle) - 0.5 * n * np.cos(angle) + 0.5 * m * np.sin(angle) + 0.5 * n
+        Y = y * np.cos(angle) + x * np.sin(angle) - 0.5 * n * np.sin(angle) - 0.5 * m * np.cos(angle) + 0.5 * m
+        return [int(X), int(Y)]
+
+    newrect = []
+    for i in range(4):
+        point = onepoint(rect[i * 2], rect[i * 2 + 1])
+        newrect.extend(point)
+    newrect.extend([1])
+    print(newrect)
+    return newrect
+
+
+def rotate_location(angle, rect):
+    """
+    rect: x,y,w,h
+    """
+    anglePi = -angle * np.pi / 180.0
+    cosA = np.cos(anglePi)
+    sinA = np.sin(anglePi)
+
+    x = rect[0]
+    y = rect[1]
+    width = rect[2]
+    height = rect[3]
+    x1 = x - 0.5 * width
+    y1 = y - 0.5 * height
+
+    x0 = x + 0.5 * width
+    y0 = y1
+
+    x2 = x1
+    y2 = y + 0.5 * height
+
+    x3 = x0
+    y3 = y2
+
+    x0n = (x0 - x) * cosA - (y0 - y) * sinA + x
+    y0n = (x0 - x) * sinA + (y0 - y) * cosA + y
+
+    x1n = (x1 - x) * cosA - (y1 - y) * sinA + x
+    y1n = (x1 - x) * sinA + (y1 - y) * cosA + y
+
+    x2n = (x2 - x) * cosA - (y2 - y) * sinA + x
+    y2n = (x2 - x) * sinA + (y2 - y) * cosA + y
+
+    x3n = (x3 - x) * cosA - (y3 - y) * sinA + x
+    y3n = (x3 - x) * sinA + (y3 - y) * cosA + y
+
+    return [(x0n, y0n), (x1n, y1n), (x2n, y2n), (x3n, y3n)]
+
+
+def letterbox(im, new_shape=640,
+              color=(114, 114, 114),
+              auto=True, scale_fill=False,
+              scale_up=True, stride=32):
+    # Resize and pad image while meeting stride-multiple constraints
+    shape = im.shape[:2]  # current shape [height, width]
+    if isinstance(new_shape, int):
+        new_shape = (new_shape, new_shape)
+
+    # Scale ratio (new / old)
+    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    if not scale_up:  # only scale down, do not scale up (for better val mAP)
+        r = min(r, 1.0)
+
+    # Compute padding
+    ratio = r, r  # width, height ratios
+    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+    if auto:  # minimum rectangle
+        dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
+    elif scale_fill:  # stretch
+        dw, dh = 0.0, 0.0
+        new_unpad = (new_shape[1], new_shape[0])
+        ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
+
+    dw /= 2  # divide padding into 2 sides
+    dh /= 2
+
+    if shape[::-1] != new_unpad:  # resize
+        im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+    return im, ratio, (dw, dh)
+
+
+def make_labelme_json(img, basename, shapes):
+    base64_str = cv2.imencode(".jpg", img)[1]
+    height, width = img.shape[:2]
+    return {
+        'version': '5.2.0.post4',
+        'flags': {},
+        'shapes': shapes,
+        'imagePath': basename,
+        'imageData': base64.b64encode(base64_str).decode(),
+        'imageHeight': height,
+        'imageWidth': width
+    }
+
+
+def show_yolo_txt(path, classes=None, colors=None, thickness=2):
+    if classes is None:
+        classes = {}
+        for i in range(10):
+            classes[i] = i
+    if colors is None:
+        colors = make_color_table(len(classes))
+    img = cv2.imread(path)
+    mask = np.zeros_like(img)
+    height, width = img.shape[:2]
+    txt = os.path.splitext(path)[0] + '.txt'
+    with open(txt, 'r') as fo:
+        lines = fo.readlines()
+    for line in lines:
+        sp = line.strip().split(' ')
+        idx, cx, cy, w, h = [float(x) for x in sp]
+        x1, y1, x2, y2 = (
+                xywh2xyxy([cx, cy, w, h]) * np.array([width, height, width, height])
+        ).astype(int)
+        if thickness == -1:
+            mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)
+        else:
+            img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
+        img = put_text(img, classes[idx], (x1, y1), (0, 0, 0), (222, 222, 222))
+    img = cv2.addWeighted(img, 0.7, mask, 0.3, 1)
+    return img
+
+
+# =========Warp face from insightface=======
+def estimate_norm(lmk, image_size=112):
+    from skimage import transform as trans
+    arcface_dst = np.array(
+        [[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
+         [41.5493, 92.3655], [70.7299, 92.2041]],
+        dtype=np.float32)
+    assert lmk.shape == (5, 2)
+    assert image_size % 112 == 0 or image_size % 128 == 0
+    if image_size % 112 == 0:
+        ratio = float(image_size) / 112.0
+        diff_x = 0
+    else:
+        ratio = float(image_size) / 128.0
+        diff_x = 8.0 * ratio
+    dst = arcface_dst * ratio
+    dst[:, 0] += diff_x
+    tform = trans.SimilarityTransform()
+    tform.estimate(lmk, dst)  # [3,3]
+    M = tform.params[0:2, :]  # 前两行
+    return M
+
+
+def norm_crop(img, landmark, image_size=112):
+    M = estimate_norm(landmark, image_size)
+    warped = cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)
+    return warped
+
+
+def norm_crop2(img, landmark, image_size=112):
+    M = estimate_norm(landmark, image_size)
+    warped = cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)
+    return warped, M
+
+
+def warp_face(img, x1, y1, x2, y2):
+    cx, cy, fw, fh = xyxy2xywh([x1, y1, x2, y2]).flatten().astype(int)
+    _scale = 256 / (max(fw, fh) * 1.5)
+    return transform(img, (cx, cy), 256, _scale, 0)
+
+
+def transform(data, center, output_size, scale, rotation):
+    from skimage import transform as trans
+    scale_ratio = scale
+    rot = float(rotation) * np.pi / 180.0
+    # translation = (output_size/2-center[0]*scale_ratio, output_size/2-center[1]*scale_ratio)
+    t1 = trans.SimilarityTransform(scale=scale_ratio)
+    cx = center[0] * scale_ratio
+    cy = center[1] * scale_ratio
+    t2 = trans.SimilarityTransform(translation=(-1 * cx, -1 * cy))
+    t3 = trans.SimilarityTransform(rotation=rot)
+    t4 = trans.SimilarityTransform(translation=(output_size / 2,
+                                                output_size / 2))
+    t = t1 + t2 + t3 + t4
+    M = t.params[0:2]
+    cropped = cv2.warpAffine(data,
+                             M, (output_size, output_size),
+                             borderValue=0.0)
+    return cropped, M
+
+
+def crop_rectangle(img, x1, y1, x2, y2):
+    height, width = img.shape[:2]
+    cx, cy, fw, fh = xyxy2xywh([x1, y1, x2, y2]).flatten().astype(int)
+    hfs = max(fw, fh) // 2
+    bx, by, ex, ey = cx - hfs, cy - hfs, cx + hfs, cy + hfs
+    bx, ex = get_offset_coordinates(bx, ex, 0, width)
+    by, ey = get_offset_coordinates(by, ey, 0, height)
+    return img[by:ey, bx:ex, :], bx, by
+
+
+def trans_points2d(pts, M):
+    new_pts = np.zeros(shape=pts.shape, dtype=np.float32)
+    for i in range(pts.shape[0]):
+        pt = pts[i]
+        new_pt = np.array([pt[0], pt[1], 1.], dtype=np.float32)
+        new_pt = np.dot(M, new_pt)
+        # print('new_pt', new_pt.shape, new_pt)
+        new_pts[i] = new_pt[0:2]
+
+    return new_pts
+
+
+def trans_points3d(pts, M):
+    scale = np.sqrt(M[0][0] * M[0][0] + M[0][1] * M[0][1])
+    # print(scale)
+    new_pts = np.zeros(shape=pts.shape, dtype=np.float32)
+    for i in range(pts.shape[0]):
+        pt = pts[i]
+        new_pt = np.array([pt[0], pt[1], 1.], dtype=np.float32)
+        new_pt = np.dot(M, new_pt)
+        # print('new_pt', new_pt.shape, new_pt)
+        new_pts[i][0:2] = new_pt[0:2]
+        new_pts[i][2] = pts[i][2] * scale
+
+    return new_pts
+
+
+def trans_points(pts, M):
+    if pts.shape[1] == 2:
+        return trans_points2d(pts, M)
+    else:
+        return trans_points3d(pts, M)
+
+
+# =======camera==========
+def pixel2d2camera3d(pt_2d, z, mtx, dist):
+    if np.ndim(z) > 1:
+        x, y = map(lambda x: int(x), pt_2d)
+        z = z[y, x]
+    if z == 0:
+        return None, None
+    k1, k2, p1, p2, k3 = np.squeeze(dist)
+    cx, cy = mtx[0, 2], mtx[1, 2]
+    fx, fy = mtx[0, 0], mtx[1, 1]
+    u, v = pt_2d
+    x, y = (u - cx) / fx, (v - cy) / fy
+
+    r = np.sqrt(x ** 2 + y ** 2)
+    k = (1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6)
+    xy = x * y
+    x_distorted = x * k + 2 * p1 * xy + p2 * (r ** 2 + 2 * x ** 2)
+    y_distorted = y * k + 2 * p2 * xy + p1 * (r ** 2 + 2 * y ** 2)
+
+    u_distorted = fx * x_distorted + cx
+    v_distorted = fy * y_distorted + cy
+
+    homo_uv1 = np.array([u_distorted, v_distorted, 1])
+    pc_xy1 = np.linalg.inv(mtx) @ homo_uv1  # p camera
+    pc_xyz = pc_xy1 * z
+    return pc_xyz, z
+
+
+def pixel2d2camera3d_numpy(p_uv, z, mtx, dist):
+    """
+
+    :param p_uv:, Nx2
+    :param z: N,
+    :param mtx: 3x3
+    :param dist: 5x1
+    :return: pc_xyz: (N, 3)
+    """
+    if np.ndim(z) == 2:
+        idxs = np.reshape(p_uv, (-1, 2)).astype(int)
+        z = z[idxs[:, 1], idxs[:, 0]]
+    k1, k2, p1, p2, k3 = np.squeeze(dist)
+    cx, cy = mtx[0, 2], mtx[1, 2]
+    fx, fy = mtx[0, 0], mtx[1, 1]
+    u, v = np.split(p_uv, 2, -1)
+    x, y = (u - cx) / fx, (v - cy) / fy
+
+    r = np.sqrt(x ** 2 + y ** 2)
+    k = (1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6)
+    xy = x * y
+    x_distorted = x * k + 2 * p1 * xy + p2 * (r ** 2 + 2 * x ** 2)
+    y_distorted = y * k + 2 * p2 * xy + p1 * (r ** 2 + 2 * y ** 2)
+
+    u_distorted = (fx * x_distorted + cx)
+    v_distorted = (fy * y_distorted + cy)
+    homo_uv1 = np.stack([u_distorted, v_distorted, np.ones_like(u_distorted)], axis=1)  # [N, 3, 1]
+    pc_xy1 = np.matmul(np.linalg.inv(mtx), homo_uv1)[..., 0]  # [N, 3, 1]
+    pc_xyz = pc_xy1 * z[:, None]  # z shape : (N, )
+    return pc_xyz, z
+
+
+def calibrate_single_camera(pattern, height, width, cols, rows, wk=-1):
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
+    obj_p = np.zeros((rows * cols, 3), np.float32)
+    obj_p[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2)
+    if isinstance(pattern, str):
+        all_path = glob.glob(pattern)
+        all_path.sort()
+    elif isinstance(pattern, list):
+        all_path = pattern
+    else:
+        raise TypeError(pattern)
+    # Arrays to store object points and image points from all the images.
+    obj_points = []  # 3d point in real world space
+    img_points = []  # 2d points in left image plane.
+    total = 0
+    for path in all_path:
+        img = cv2.imread(path)[:height, :width, :]
+
+        # Using OpenCV
+        # Find the chess board corners
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        ret, corners = cv2.findChessboardCorners(gray, (cols, rows), None)
+
+        if ret:
+            total += 1
+            corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            obj_points.append(obj_p)
+            img_points.append(corners)
+
+            if wk >= 0:
+                print(path)
+                img = cv2.drawChessboardCorners(img, (cols, rows), corners, ret)
+        if wk >= 0:
+            cv2.imshow('draw', img)
+            cv2.waitKey(wk)
+    print("Using...", total)
+    ret, mtx, dist, r_vecs, t_vecs = cv2.calibrateCamera(obj_points, img_points, (width, height), None, None)
+    print("CameraCalibrate:")
+    print("MRS: ", ret)
+    print(mtx)
+    print(dist)
+    print('=' * 40)
+    return ret, mtx, dist
+
+
+def cal_euler(start, end):
+    dx, dy, dz = end - start
+    pitch = np.rad2deg(np.arcsin(-dy / (np.sqrt(dx ** 2 + dz ** 2 + dy ** 2) + 1e-7)))  # -dy: 向上为正
+    yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx 表示向左为正
+    return pitch, yaw
+
+
+def write_img_and_txt(basename, img, text):
+    imwrite(basename + '.png', img)
+    with open(basename + '.txt', 'w') as fo:
+        fo.write(text)
+
+
+def draw_gaze(image, start, pitchyaw, length=40.0, thickness=1, color=(0, 0, 255), is_degree=False):
+    """Draw gaze angle on given image with a given eye positions.
+
+    pitchyaw: x朝右，y朝上
+    pixel: x朝右，y朝下
+    """
+    if is_degree:
+        pitchyaw = np.deg2rad(pitchyaw)
+    pitch, yaw = pitchyaw
+    x, y = start
+    if np.ndim(image) == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    dx = length * np.sin(yaw)
+    dy = -length * np.tan(pitch)
+    cv2.arrowedLine(
+        image, (int(x), int(y)),
+        (int(x + dx), int(y + dy)), color,
+        thickness, cv2.LINE_AA, tipLength=0.2
+    )
+    return image
