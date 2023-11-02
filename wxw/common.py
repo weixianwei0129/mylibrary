@@ -204,6 +204,7 @@ def put_text(
         tl = round(0.02 * np.sqrt(im0.shape[0] ** 2 + im0.shape[1] ** 2)) + 1
 
     font = ImageFont.load_default()
+    # font = ImageFont.truetype(absolute_path, tl)
     if is_chinese(text):
         if not os.path.exists(chinese_font):
             print(f"有中文, 但没有对应的字体 'resource/Songti.ttc'. ")
@@ -922,9 +923,11 @@ def calibrate_single_camera(pattern, height, width, cols, rows, wk=-1):
 
 
 def write_img_and_txt(basename, img, text):
-    imwrite(basename + ".png", img)
-    with open(basename + ".txt", "w") as fo:
-        fo.write(text)
+    if img:
+        imwrite(basename + ".png", img)
+    if text:
+        with open(basename + ".txt", "w") as fo:
+            fo.write(text)
 
 
 def draw_gaze(
