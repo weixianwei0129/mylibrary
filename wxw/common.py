@@ -21,6 +21,7 @@ from collections import defaultdict
 import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
+import matplotlib.font_manager as fm
 
 random.seed(123456)
 
@@ -203,8 +204,8 @@ def put_text(
     if tl is None:
         tl = round(0.02 * np.sqrt(im0.shape[0] ** 2 + im0.shape[1] ** 2)) + 1
 
-    font = ImageFont.load_default()
-    # font = ImageFont.truetype(absolute_path, tl)
+    en_path = fm.findfont(fm.FontProperties(family='Arial'))
+    font = ImageFont.truetype(en_path, tl)
     if is_chinese(text):
         if not os.path.exists(chinese_font):
             print(f"有中文, 但没有对应的字体 'resource/Songti.ttc'. ")
@@ -408,7 +409,7 @@ class LabelObject(object):
     width = None
 
 
-def parse_json(path, polygon):
+def parse_json(path, polygon) -> [list, np.ndarray, str]:
     info = json.load(open(path, "r"))
     base64_str = info.get("imageData", None)
     if base64_str is None:
@@ -512,7 +513,13 @@ def make_color_table(number):
     return color_table
 
 
-def multi_process(func, need_process_data, process_method, num_thread=1):
+def multi_process(process_method, need_process_data, num_thread=1):
+    """
+    'process_method' should be:
+    def process_method(args):
+        thread_idx, need_process_data = args
+        .....
+    """
     if num_thread == 1:
         process_method([0, need_process_data])
     else:
@@ -529,7 +536,7 @@ def multi_process(func, need_process_data, process_method, num_thread=1):
             begin += interval
             end += interval
         pool = Pool(num_thread)
-        pool.map(func, works)
+        pool.map(process_method, works)
 
 
 def simplify_number(decimal):
@@ -544,37 +551,10 @@ def simplify_number(decimal):
     return string, fraction.numerator, fraction.denominator
 
 
-def rotate_image(angle, rect):
-    angle = angle * np.pi / 180
-    n = 1600
-    m = 1200
-
-    def onepoint(x, y):
-        # X = x*np.cos(angle) - y*np.sin(angle)-0.5*n*np.cos(angle)+0.5*m*np.sin(angle)+0.5*n
-        # Y = y*np.cos(angle) + x*np.sin(angle)-0.5*n*np.sin(angle)-0.5*m*np.cos(angle)+0.5*m
-        X = (
-                x * np.cos(angle)
-                - y * np.sin(angle)
-                - 0.5 * n * np.cos(angle)
-                + 0.5 * m * np.sin(angle)
-                + 0.5 * n
-        )
-        Y = (
-                y * np.cos(angle)
-                + x * np.sin(angle)
-                - 0.5 * n * np.sin(angle)
-                - 0.5 * m * np.cos(angle)
-                + 0.5 * m
-        )
-        return [int(X), int(Y)]
-
-    newrect = []
-    for i in range(4):
-        point = onepoint(rect[i * 2], rect[i * 2 + 1])
-        newrect.extend(point)
-    newrect.extend([1])
-    print(newrect)
-    return newrect
+def rotate_image(img, point, angle, scale=1.0):
+    height, width = img.shape[:2]
+    rotate_mtx = cv2.getRotationMatrix2D(point, angle, scale)
+    return cv2.warpAffine(img, rotate_mtx, (width, height))
 
 
 def rotate_location(angle, rect):
@@ -923,9 +903,9 @@ def calibrate_single_camera(pattern, height, width, cols, rows, wk=-1):
 
 
 def write_img_and_txt(basename, img, text):
-    if img:
+    if img is not None:
         imwrite(basename + ".png", img)
-    if text:
+    if text is not None:
         with open(basename + ".txt", "w") as fo:
             fo.write(text)
 
