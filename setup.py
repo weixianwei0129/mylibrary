@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='wxw',  # 库的名称
-    version='0.1.1',  # 版本号
+    version='0.1.2',  # 版本号
     keywords=['pip', 'wxw'],
     description='A library for wxw',  # 简要描述
     long_description="Includes some ways to work with pictures, add qt utils",
