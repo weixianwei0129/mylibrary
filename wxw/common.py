@@ -167,10 +167,19 @@ def get_offset_coordinates(v1, v2, v_min, v_max):
     return v1, v2
 
 
-def imshow(s, img, t=0):
-    cv2.imshow(s, img)
-    if cv2.waitKey(t) == ord("q"):
+def imshow(name, img, t=0, cmp=113):
+    """
+    name: window name
+    img: ndarray
+    t: time step
+    cmp: 113 is 'q', 27 is 'esc'
+    """
+    if img is not None:
+        cv2.imshow(name, img)
+    key = cv2.waitKey(t)
+    if key == cmp:
         exit()
+    return key
 
 
 def imwrite(path, img):
@@ -193,7 +202,14 @@ def put_text(
         text_color=None,
         tl=None,
         chinese_font="resource/Songti.ttc",
+        alpha=1.0
 ):
+    """
+    
+    alpha: 不透明度 
+    """
+    if text == '':
+        return im0
     x1, y1 = np.array(pts, dtype=int)
     if bg_color is None:
         bg_color = (0, 0, 0)
@@ -219,11 +235,13 @@ def put_text(
     c1 = x_b, y_b
     c3 = x_e, y_e
 
-    cv2.rectangle(im0, c1, c3, bg_color, -1, cv2.LINE_AA)  # filled
-    img_pillow = Image.fromarray(cv2.cvtColor(im0, cv2.COLOR_BGR2RGB))
+    img = im0.copy()
+    cv2.rectangle(img, c1, c3, bg_color, -1, cv2.LINE_AA)  # filled
+    img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pillow)
     draw.text(c1, text, font=font, fill=text_color)
-    im0 = cv2.cvtColor(np.asarray(img_pillow), cv2.COLOR_RGB2BGR)
+    img = cv2.cvtColor(np.asarray(img_pillow), cv2.COLOR_RGB2BGR)
+    im0 = cv2.addWeighted(im0, (1 - alpha), img, alpha, 0)
     return im0
 
 
