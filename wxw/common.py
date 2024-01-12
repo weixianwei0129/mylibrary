@@ -22,7 +22,9 @@ import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.font_manager as fm
+from functools import partial
 
+np.random.seed(123456)
 random.seed(123456)
 
 
@@ -92,43 +94,50 @@ def pad_image(img, target=None, value=(0, 0, 0), centre=True):
 
 
 def divisibility(a, r=32):
+    if r == 1:
+        return int(a)
     return int(np.ceil(a / r) * r)
 
 
-def size_pre_process(img, longest=1024, **kwargs):
+def size_pre_process(img, longest=4096, **kwargs):
     """kwargs
     interpolation
 
     """
+    align_fun = partial(divisibility, r=kwargs.get('align', 32))
     h, w = img.shape[:2]
     if "hard" in kwargs:
-        rw = rh = divisibility(kwargs["hard"])
+        rw = rh = align_fun(kwargs["hard"])
     elif "short" in kwargs:
         short = kwargs["short"]
         if h > w:
             rw = short
-            rh = divisibility(h / w * rw)
+            rh = align_fun(h / w * rw)
         else:
             rh = short
-            rw = divisibility(w / h * rh)
+            rw = align_fun(w / h * rh)
     elif "long" in kwargs:
         long = kwargs["long"]
         if h < w:
             rw = long
-            rh = divisibility(h / w * rw)
+            rh = align_fun(h / w * rw)
         else:
             rh = long
-            rw = divisibility(w / h * rh)
+            rw = align_fun(w / h * rh)
     elif "height" in kwargs:
-        rh = divisibility(kwargs["height"])
-        rw = divisibility(w / h * rh)
+        rh = align_fun(kwargs["height"])
+        rw = align_fun(w / h * rh)
     elif "width" in kwargs:
-        rw = divisibility(kwargs["width"])
-        rh = divisibility(h / w * rw)
+        rw = align_fun(kwargs["width"])
+        rh = align_fun(h / w * rw)
     else:
         return None
-    rw = min(rw, longest)
-    rh = min(rh, longest)
+    if rw > longest:
+        print(f"rw({rw}->{longest})")
+        rw = longest
+    if rh > longest:
+        print(f"rh({rh}->{longest})")
+        rh = logging
     interpolation = kwargs.get("interpolation", None)
     if interpolation is None:
         if rw * rh > h * w:
@@ -205,42 +214,54 @@ def put_text(
         alpha=1.0
 ):
     """
-    
-    alpha: 不透明度 
+
+    alpha: 不透明度
     """
-    if text == '':
-        return im0
-    x1, y1 = np.array(pts, dtype=int)
-    if bg_color is None:
-        bg_color = (0, 0, 0)
-    if text_color is None:
-        text_color = (255, 255, 255)
-    h, w = im0.shape[:2]
-
-    if tl is None:
-        tl = round(0.02 * np.sqrt(im0.shape[0] ** 2 + im0.shape[1] ** 2)) + 1
-
-    en_path = fm.findfont(fm.FontProperties(family='Arial'))
-    font = ImageFont.truetype(en_path, tl)
+    # ============config========
     if is_chinese(text):
         if not os.path.exists(chinese_font):
             print(f"有中文, 但没有对应的字体 'resource/Songti.ttc'. ")
         else:
             font = ImageFont.truetype(chinese_font, tl)
 
-    tw, th = font.getsize(text)
-    x_b, x_e = get_offset_coordinates(x1, x1 + tw, 0, w)
-    y_b, y_e = get_offset_coordinates(y1 - th - 3, y1, 0, h)
+    if bg_color is None:
+        bg_color = (0, 0, 0)
+    if text_color is None:
+        text_color = (255, 255, 255)
+    height, width = im0.shape[:2]
+    if tl is None:
+        tl = round(0.02 * np.sqrt(height ** 2 + width ** 2)) + 1
+    en_path = fm.findfont(fm.FontProperties(family="Arial"))
+    font = ImageFont.truetype(en_path, tl)
 
-    c1 = x_b, y_b
-    c3 = x_e, y_e
+    # ==========offset position=======
+    x1, y1 = np.array(pts, dtype=int)
+    x2, y2 = x1, y1
+    font_sizes = []
+    texts = text.replace('\r', '\n').split('\n')
+    for text in texts:
+        tw, th = font.getsize(text)
+        font_sizes.append([tw, th])
+        x2 = max(x2, x1 + tw)
+        y2 += th + 2
 
+    x1, _ = get_offset_coordinates(x1, x2, 0, width)
+    y1, _ = get_offset_coordinates(y1, y2, 0, height)
     img = im0.copy()
-    cv2.rectangle(img, c1, c3, bg_color, -1, cv2.LINE_AA)  # filled
-    img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img_pillow)
-    draw.text(c1, text, font=font, fill=text_color)
-    img = cv2.cvtColor(np.asarray(img_pillow), cv2.COLOR_RGB2BGR)
+    for text, (tw, th) in zip(texts, font_sizes):
+        left_top_x, left_top_y = x1, y1
+        right_bottom_x, right_bottom_y = x1 + tw, y1 + th
+        if bg_color != -1:
+            cv2.rectangle(
+                img, (left_top_x, left_top_y - 1),
+                (right_bottom_x, right_bottom_y + 1),
+                bg_color, -1, cv2.LINE_AA
+            )
+        img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img_pillow)
+        draw.text((left_top_x, left_top_y), text, font=font, fill=text_color)
+        img = cv2.cvtColor(np.asarray(img_pillow), cv2.COLOR_RGB2BGR)
+        x1, y1 = left_top_x, right_bottom_y + 1
     im0 = cv2.addWeighted(im0, (1 - alpha), img, alpha, 0)
     return im0
 
@@ -525,8 +546,16 @@ def random_color(amin, amax):
 
 
 def make_color_table(number):
-    color_table = {0: (222, 0, 0), 1: (0, 0, 222), 2: (0, 222, 0)}
-    for i in range(3, number):
+    if number < 10:
+        colors = np.array(plt.cm.tab10.colors[:number]) * 255
+        colors = colors[:, ::-1].astype(np.uint8)
+    else:
+        colors = np.array(plt.cm.tab20.colors[:number]) * 255
+        colors = colors[:, ::-1].astype(np.uint8)
+    color_table = {}
+    for i in range(number):
+        color_table[i] = tuple(colors[i].tolist())
+    for i in range(number - len(color_table), number):
         color_table[i] = random_color(127, 255)
     return color_table
 
@@ -569,10 +598,13 @@ def simplify_number(decimal):
     return string, fraction.numerator, fraction.denominator
 
 
-def rotate_image(img, point, angle, scale=1.0):
+def rotate_image(img, angle, point=None, scale=1.0):
+    """逆时针旋转为正"""
     height, width = img.shape[:2]
+    if point is None:
+        point = (width // 2, height // 2)
     rotate_mtx = cv2.getRotationMatrix2D(point, angle, scale)
-    return cv2.warpAffine(img, rotate_mtx, (width, height))
+    return cv2.warpAffine(img, rotate_mtx, (width, height), borderMode=cv2.BORDER_REPLICATE)
 
 
 def rotate_location(angle, rect):
@@ -822,11 +854,13 @@ def pixel2d2camera3d(pt_2d, z, mtx, dist):
     u, v = pt_2d
     x, y = (u - cx) / fx, (v - cy) / fy
 
+    # ===============================
     r = np.sqrt(x ** 2 + y ** 2)
     k = 1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6
     xy = x * y
     x_distorted = x * k + 2 * p1 * xy + p2 * (r ** 2 + 2 * x ** 2)
     y_distorted = y * k + 2 * p2 * xy + p1 * (r ** 2 + 2 * y ** 2)
+    # =====x -> x_distorted=========y -> y_distorted=================
 
     u_distorted = fx * x_distorted + cx
     v_distorted = fy * y_distorted + cy
@@ -835,6 +869,13 @@ def pixel2d2camera3d(pt_2d, z, mtx, dist):
     pc_xy1 = np.linalg.inv(mtx) @ homo_uv1  # p camera
     pc_xyz = pc_xy1 * z
     return pc_xyz, z
+
+
+def warp_pts_with_homo(x, y, mtx):
+    homo = np.array([x, y, 1]).T
+    home = mtx @ homo
+    home /= home[2]
+    return home
 
 
 def pixel2d2camera3d_numpy(p_uv, z, mtx, dist):
@@ -920,11 +961,15 @@ def calibrate_single_camera(pattern, height, width, cols, rows, wk=-1):
     return ret, mtx, dist
 
 
-def write_img_and_txt(basename, img, text):
+def write_img_and_txt(split_name, img, text):
+    if split_name[-4] == '.':
+        split_name = split_name[:-4]
     if img is not None:
-        imwrite(basename + ".png", img)
+        os.makedirs(os.path.dirname(split_name), exist_ok=True)
+        imwrite(split_name + ".png", img)
     if text is not None:
-        with open(basename + ".txt", "w") as fo:
+        with open(split_name + ".txt", "w") as fo:
+            os.makedirs(os.path.dirname(split_name), exist_ok=True)
             fo.write(text)
 
 
@@ -956,11 +1001,12 @@ def draw_gaze(
     return image
 
 
-def gaze3dTo2d(start, end):
-    dx, dy, dz = end - start
-    pitch = np.rad2deg(
-        np.arcsin(-dy / (np.sqrt(dx ** 2 + dz ** 2 + dy ** 2) + 1e-7))
-    )  # -dy: 向上为正
+def gaze3dTo2d(gaze3d, M=None):
+    if M is not None:
+        gaze3d = np.dot(M, gaze3d)
+    gaze3d = gaze3d / np.linalg.norm(gaze3d)
+    dx, dy, dz = gaze3d
+    pitch = np.rad2deg(np.arcsin(-dy))  # -dy: 向上为正
     yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx 表示向左为正
     return pitch, yaw
 
@@ -976,9 +1022,10 @@ def gaze2dTo3d(pitch, yaw, is_degree=True):
     yaw = np.reshape(yaw, (-1, 1))
     batch = np.shape(pitch)[0]
     gaze = np.zeros((batch, 3))
-    gaze[:, 0] = -np.cos(pitch) * np.sin(yaw)
+    gaze[:, 0] = np.cos(pitch) * np.sin(yaw)
     gaze[:, 1] = -np.sin(pitch)
     gaze[:, 2] = -np.cos(pitch) * np.cos(yaw)
+    gaze = gaze / np.linalg.norm(gaze, axis=1, keepdims=True)
     return gaze
 
 
@@ -1029,6 +1076,7 @@ class LogHistory:
 
 # =============Train===========
 
+
 def set_file_only_read(filename):
     # 获取当前文件的权限
     current_permissions = os.stat(filename).st_mode
@@ -1061,31 +1109,41 @@ def set_random_seed(seed=123456, deterministic=False):
         cudnn.benchmark = True
 
 
-def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
+def smart_optimizer(model, name="Adam", lr=0.001, momentum=0.9, decay=1e-5):
     # YOLOv5 3-param group optimizer: 0) weights with decay, 1) weights no decay, 2) biases no decay
     g = [], [], []  # optimizer parameter groups
-    bn = tuple(v for k, v in torch.nn.__dict__.items() if 'Norm' in k)  # normalization layers, i.e. BatchNorm2d()
+    bn = tuple(
+        v for k, v in torch.nn.__dict__.items() if "Norm" in k
+    )  # normalization layers, i.e. BatchNorm2d()
     for v in model.modules():
         for p_name, p in v.named_parameters(recurse=0):
-            if p_name == 'bias':  # bias (no decay)
+            if p_name == "bias":  # bias (no decay)
                 g[2].append(p)
-            elif p_name == 'weight' and isinstance(v, bn):  # weight (no decay)
+            elif p_name == "weight" and isinstance(v, bn):  # weight (no decay)
                 g[1].append(p)
             else:
                 g[0].append(p)  # weight (with decay)
-    if name == 'Adam':
-        optimizer = torch.optim.Adam(g[2], lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
-    elif name == 'AdamW':
-        optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
-    elif name == 'RMSProp':
+    if name == "Adam":
+        optimizer = torch.optim.Adam(
+            g[2], lr=lr, betas=(momentum, 0.999)
+        )  # adjust beta1 to momentum
+    elif name == "AdamW":
+        optimizer = torch.optim.AdamW(
+            g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0
+        )
+    elif name == "RMSProp":
         optimizer = torch.optim.RMSprop(g[2], lr=lr, momentum=momentum)
-    elif name == 'SGD':
+    elif name == "SGD":
         optimizer = torch.optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
     else:
-        raise NotImplementedError(f'Optimizer {name} not implemented.')
+        raise NotImplementedError(f"Optimizer {name} not implemented.")
 
-    optimizer.add_param_group({'params': g[0], 'weight_decay': decay})  # add g0 with weight_decay
-    optimizer.add_param_group({'params': g[1], 'weight_decay': 0.0})  # add g1 (BatchNorm2d weights)
+    optimizer.add_param_group(
+        {"params": g[0], "weight_decay": decay}
+    )  # add g0 with weight_decay
+    optimizer.add_param_group(
+        {"params": g[1], "weight_decay": 0.0}
+    )  # add g1 (BatchNorm2d weights)
     return optimizer
 
 
@@ -1093,9 +1151,120 @@ def smart_lr(warm, lr_init, lrf, epochs, cycle):
     epochs -= 1  # last_step begin with 0
     if cycle:
         y1, y2 = 1.0, lrf
-        return lambda t: t / warm if t < warm else \
-            ((1 - np.cos((t - warm) / (epochs - warm) * np.pi)) / 2) * (y2 - y1) + y1
+        return (
+            lambda t: t / warm
+            if t < warm
+            else ((1 - np.cos((t - warm) / (epochs - warm) * np.pi)) / 2) * (y2 - y1)
+                 + y1
+        )
     else:
         lr_min = lr_init * lrf
-        return lambda x: x / warm if 0 < x < warm else \
-            (1 - (x - warm) / (epochs - warm)) * (1 - lr_min) + lr_min
+        return (
+            lambda x: x / warm
+            if 0 < x < warm
+            else (1 - (x - warm) / (epochs - warm)) * (1 - lr_min) + lr_min
+        )
+
+
+def center_crop(bbox, ratio, width, height):
+    (x1, y1, x2, y2) = bbox
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    fw, fh = abs(x2 - x1), abs(y2 - y1)
+    side = max(fw, fh) * ratio
+    x1, x2 = get_offset_coordinates(
+        cx - side / 2, cx + side / 2, 0, width - 1
+    )
+    y1, y2 = get_offset_coordinates(
+        cy - side / 2, cy + side / 2, 0, height - 1
+    )
+    x1, x2, y1, y2 = map(int, [x1, x2, y1, y2])
+    return x1, y1, x2, y2
+
+
+def GetEuler(rotation_vector, translation_vector):
+    """
+    此函数用于从旋转向量计算欧拉角
+    :param rotation_vector: 输入为旋转向量
+    :return: 返回欧拉角在三个轴上的值
+    """
+    rvec_matrix = cv2.Rodrigues(rotation_vector)[0]
+    proj_matrix = np.hstack((rvec_matrix, translation_vector))
+    eulerAngles = -cv2.decomposeProjectionMatrix(proj_matrix)[6]
+    pitch = eulerAngles[0]
+    yaw = eulerAngles[1]
+    roll = eulerAngles[2]
+    rot_params = np.array([pitch, yaw, roll]).flatten()
+    return rot_params
+
+
+class NormalWarp:
+    def __init__(self, c_mtx, c_dist, distance_norm=1000, focal_norm=1600):
+        self.c_mtx, self.c_dist = c_mtx, c_dist
+        self.c_mtx_inv = np.linalg.inv(self.c_mtx)
+
+        self.face_pts = np.array([
+            [-45.0968, -21.3129, 21.3129, 45.0968, -26.2996, 26.2996],
+            [-0.4838, 0.4838, 0.4838, -0.4838, 68.595, 68.595],
+            [2.397, -2.397, -2.397, 2.397, -0.0, -0.0]
+        ])
+        self.face_pts_t = self.face_pts.T.reshape(-1, 1, 3)
+
+        self.distance_norm = distance_norm  # normalized distance between eye and camera
+        focal_norm = focal_norm  # focal length of normalized camera
+        self.roiSize = (448, 448)  # size of cropped eye image
+        self.n_ctx = np.array([
+            [focal_norm, 0, self.roiSize[0] / 2],
+            [0, focal_norm, self.roiSize[1] / 2],
+            [0, 0, 1.0],
+        ])
+
+    def estimate_head_pose(self, landmarks, iterate=True):
+        landmarks = np.reshape(landmarks, (-1, 2))
+        ret, rvec, tvec = cv2.solvePnP(
+            self.face_pts_t, landmarks, self.c_mtx, self.c_dist, flags=cv2.SOLVEPNP_EPNP
+        )
+
+        # further optimize
+        if iterate:
+            ret, rvec, tvec = cv2.solvePnP(
+                self.face_pts_t, landmarks, self.c_mtx, self.c_dist, rvec, tvec, True
+            )
+        head_euler = GetEuler(rvec, tvec)
+        return rvec, tvec, head_euler
+
+    def __call__(self, image, landmarks):
+        hr, ht, _ = self.estimate_head_pose(landmarks)
+
+        # compute estimated 3D positions of the landmarks
+        ht = np.repeat(ht, 6, axis=1)  # 6 points
+        hR = cv2.Rodrigues(hr)[0]  # converts rotation vector to rotation matrix
+        Fc = np.dot(hR, self.face_pts) + ht  # 3D positions of facial landmarks
+        face_center = np.sum(Fc, axis=1, dtype=np.float32) / 6.0  # 人脸中心点
+
+        # ---------- normalize image ----------
+        distance = np.linalg.norm(face_center)  # actual distance face center and original camera
+
+        # 计算新的坐标系，右眼指向左眼为x轴；嘴巴的中点向眼睛连线作垂线，向下为y轴；垂直于xy为z轴，方向是相机指向新坐标系原点
+        face_center /= distance
+        forward = face_center.reshape(3)
+        hR = cv2.Rodrigues(hr)[0]
+        hRx = hR[:, 0]
+        down = np.cross(forward, hRx)
+        down /= np.linalg.norm(down)
+        right = np.cross(down, forward)
+        right /= np.linalg.norm(right)
+        m_mtx = np.c_[right, down, forward].T  # rotation matrix R
+
+        s_mtx = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, self.distance_norm / distance],
+        ])
+        w_mtx = np.dot(
+            np.dot(self.n_ctx, s_mtx),
+            np.dot(m_mtx, self.c_mtx_inv)
+        )  # (C_norm . M . C_c-1)
+
+        # ---------裁剪人脸图片---------
+        face_image = cv2.warpPerspective(image, w_mtx, self.roiSize)
+        return face_image, m_mtx, w_mtx
