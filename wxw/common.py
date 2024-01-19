@@ -13,16 +13,11 @@ from io import BytesIO
 from functools import partial
 import matplotlib.pylab as plt
 from multiprocessing import Pool
+from collections import defaultdict
 
 from PIL import Image
 from PIL import ImageFont, ImageDraw
-from collections import defaultdict
-
-import torch
-import torch.backends.cudnn as cudnn
-from torch.utils.tensorboard import SummaryWriter
 import matplotlib.font_manager as fm
-from functools import partial
 
 np.random.seed(123456)
 random.seed(123456)
@@ -33,13 +28,13 @@ class ONNXRunner:
         import onnxruntime
 
         providers = [
-            "CoreMLExecutionProvider"
-        ]  # 'CUDAExecutionProvider' 'CPUExecutionProvider'
+            "CUDAExecutionProvider", 'CoreMLExecutionProvider', 'CPUExecutionProvider'
+        ]
         self.session = onnxruntime.InferenceSession(path, providers=providers)
         print("inputs: ", [x.name for x in self.session.get_inputs()])
         print("outputs: ", [x.name for x in self.session.get_outputs()])
 
-    def run(self, img):
+    def __call__(self, img):
         try:
             return self.session.run(
                 [x.name for x in self.session.get_outputs()],
@@ -218,12 +213,6 @@ def put_text(
     alpha: 不透明度
     """
     # ============config========
-    if is_chinese(text):
-        if not os.path.exists(chinese_font):
-            print(f"有中文, 但没有对应的字体 'resource/Songti.ttc'. ")
-        else:
-            font = ImageFont.truetype(chinese_font, tl)
-
     if bg_color is None:
         bg_color = (0, 0, 0)
     if text_color is None:
@@ -232,23 +221,38 @@ def put_text(
     if tl is None:
         tl = round(0.02 * np.sqrt(height ** 2 + width ** 2)) + 1
     en_path = fm.findfont(fm.FontProperties(family="Arial"))
-    font = ImageFont.truetype(en_path, tl)
+    font = ImageFont.truetype(en_path, int(tl))
+    if is_chinese(text):
+        if not os.path.exists(chinese_font):
+            print(f"有中文, 但没有对应的字体 {chinese_font}. ")
+        else:
+            font = ImageFont.truetype(chinese_font, int(tl))
 
     # ==========offset position=======
     x1, y1 = np.array(pts, dtype=int)
     x2, y2 = x1, y1
     font_sizes = []
     texts = text.replace('\r', '\n').split('\n')
+    cur_texts = []
     for text in texts:
-        tw, th = font.getsize(text)
-        font_sizes.append([tw, th])
-        x2 = max(x2, x1 + tw)
-        y2 += th + 2
-
+        cur_text = [text]
+        while cur_text:
+            text = cur_text.pop()
+            if text:
+                tw, th = font.getsize(text)
+                if tw > width:
+                    mid = int(width / (font.getsize(text[0])[0] + 1))
+                    cur_text.append(text[mid:])
+                    cur_text.append(text[:mid])
+                else:
+                    x2 = max(x2, x1 + tw)
+                    y2 += th + 2
+                    font_sizes.append([tw, th])
+                    cur_texts.append(text)
     x1, _ = get_offset_coordinates(x1, x2, 0, width)
     y1, _ = get_offset_coordinates(y1, y2, 0, height)
     img = im0.copy()
-    for text, (tw, th) in zip(texts, font_sizes):
+    for text, (tw, th) in zip(cur_texts, font_sizes):
         left_top_x, left_top_y = x1, y1
         right_bottom_x, right_bottom_y = x1 + tw, y1 + th
         if bg_color != -1:
@@ -797,13 +801,15 @@ def transform(data, center, output_size, scale, rotation):
     return cropped, M
 
 
-def crop_rectangle(img, x1, y1, x2, y2):
+def center_crop_rectangle(img, x1, y1, x2, y2, ratio=1.0):
     height, width = img.shape[:2]
     cx, cy, fw, fh = xyxy2xywh([x1, y1, x2, y2]).flatten().astype(int)
-    hfs = max(fw, fh) // 2
+    hfs = max(fw, fh) // 2 * ratio
     bx, by, ex, ey = cx - hfs, cy - hfs, cx + hfs, cy + hfs
     bx, ex = get_offset_coordinates(bx, ex, 0, width)
     by, ey = get_offset_coordinates(by, ey, 0, height)
+    bx, by, ex, ey = [int(x) for x in [bx, by, ex, ey]]
+    # print(bx, by, ex, ey)
     return img[by:ey, bx:ex, :], bx, by
 
 
@@ -973,7 +979,7 @@ def write_img_and_txt(split_name, img, text):
             fo.write(text)
 
 
-def draw_gaze(
+def draw_gaze_with_k(
         image, start, pitchyaw, length, thickness=1, color=(0, 0, 255), is_degree=False
 ):
     """Draw gaze angle on given image with a given eye positions.
@@ -997,6 +1003,16 @@ def draw_gaze(
         thickness,
         cv2.LINE_AA,
         tipLength=0.2,
+    )
+    k = dy / dx
+    return image, k
+
+
+def draw_gaze(
+        image, start, pitchyaw, length, thickness=1, color=(0, 0, 255), is_degree=False
+):
+    image, _ = draw_gaze_with_k(
+        image, start, pitchyaw, length, thickness, color, is_degree
     )
     return image
 
@@ -1038,150 +1054,7 @@ def cosine_similarity_deg(a, b):
     return np.rad2deg(loss_rad)
 
 
-# =================Train===============
-
-
-class LogHistory:
-    def __init__(self, log_dir):
-        self.log_dir = log_dir
-        os.makedirs(self.log_dir, exist_ok=True)
-        self.losses = defaultdict(list)
-        self.writer = SummaryWriter(self.log_dir)
-        self.plt_colors = ["red", "yellow", "black", "blue"]
-
-    def add_graph(self, model, size):
-        try:
-            dummy_input = torch.randn((2, 3, size[0], size[1]))
-            self.writer.add_graph(model, dummy_input)
-        except Exception as why:
-            print("dummy model: ")
-            print(why)
-            pass
-
-    def update_info(self, info, epoch):
-        for name, value in info.items():
-            if np.isscalar(value):
-                self.add_scalar(name, value, epoch)
-            elif type(value) in [torch.Tensor]:
-                self.add_image(name, value, epoch)
-            else:
-                raise TypeError(f"{name}: {type(value)}, {value}")
-
-    def add_scalar(self, name, value, epoch):
-        self.writer.add_scalar(name, value, epoch)
-
-    def add_image(self, name, images, epoch):
-        self.writer.add_images(name, images, epoch)
-
-
-# =============Train===========
-
-
-def set_file_only_read(filename):
-    # 获取当前文件的权限
-    current_permissions = os.stat(filename).st_mode
-
-    # 设置文件为只读
-    os.chmod(filename, current_permissions & ~0o222)  # 将写权限（w）移除
-
-    # 检查文件权限
-    new_permissions = os.stat(filename).st_mode
-    if not new_permissions & 0o222:
-        print(f"{filename}设置为只读成功！")
-    else:
-        print(f"{filename}设置为只读失败！")
-
-
-def set_random_seed(seed=123456, deterministic=False):
-    """ Set random state to random libray, numpy, torch and cudnn.
-    Args:
-        seed: int value.
-        deterministic: bool value.
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if deterministic:
-        cudnn.deterministic = True
-        cudnn.benchmark = False
-    else:
-        cudnn.deterministic = False
-        cudnn.benchmark = True
-
-
-def smart_optimizer(model, name="Adam", lr=0.001, momentum=0.9, decay=1e-5):
-    # YOLOv5 3-param group optimizer: 0) weights with decay, 1) weights no decay, 2) biases no decay
-    g = [], [], []  # optimizer parameter groups
-    bn = tuple(
-        v for k, v in torch.nn.__dict__.items() if "Norm" in k
-    )  # normalization layers, i.e. BatchNorm2d()
-    for v in model.modules():
-        for p_name, p in v.named_parameters(recurse=0):
-            if p_name == "bias":  # bias (no decay)
-                g[2].append(p)
-            elif p_name == "weight" and isinstance(v, bn):  # weight (no decay)
-                g[1].append(p)
-            else:
-                g[0].append(p)  # weight (with decay)
-    if name == "Adam":
-        optimizer = torch.optim.Adam(
-            g[2], lr=lr, betas=(momentum, 0.999)
-        )  # adjust beta1 to momentum
-    elif name == "AdamW":
-        optimizer = torch.optim.AdamW(
-            g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0
-        )
-    elif name == "RMSProp":
-        optimizer = torch.optim.RMSprop(g[2], lr=lr, momentum=momentum)
-    elif name == "SGD":
-        optimizer = torch.optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
-    else:
-        raise NotImplementedError(f"Optimizer {name} not implemented.")
-
-    optimizer.add_param_group(
-        {"params": g[0], "weight_decay": decay}
-    )  # add g0 with weight_decay
-    optimizer.add_param_group(
-        {"params": g[1], "weight_decay": 0.0}
-    )  # add g1 (BatchNorm2d weights)
-    return optimizer
-
-
-def smart_lr(warm, lr_init, lrf, epochs, cycle):
-    epochs -= 1  # last_step begin with 0
-    if cycle:
-        y1, y2 = 1.0, lrf
-        return (
-            lambda t: t / warm
-            if t < warm
-            else ((1 - np.cos((t - warm) / (epochs - warm) * np.pi)) / 2) * (y2 - y1)
-                 + y1
-        )
-    else:
-        lr_min = lr_init * lrf
-        return (
-            lambda x: x / warm
-            if 0 < x < warm
-            else (1 - (x - warm) / (epochs - warm)) * (1 - lr_min) + lr_min
-        )
-
-
-def center_crop(bbox, ratio, width, height):
-    (x1, y1, x2, y2) = bbox
-    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-    fw, fh = abs(x2 - x1), abs(y2 - y1)
-    side = max(fw, fh) * ratio
-    x1, x2 = get_offset_coordinates(
-        cx - side / 2, cx + side / 2, 0, width - 1
-    )
-    y1, y2 = get_offset_coordinates(
-        cy - side / 2, cy + side / 2, 0, height - 1
-    )
-    x1, x2, y1, y2 = map(int, [x1, x2, y1, y2])
-    return x1, y1, x2, y2
-
-
-def GetEuler(rotation_vector, translation_vector):
+def compute_euler(rotation_vector, translation_vector):
     """
     此函数用于从旋转向量计算欧拉角
     :param rotation_vector: 输入为旋转向量
@@ -1229,7 +1102,7 @@ class NormalWarp:
             ret, rvec, tvec = cv2.solvePnP(
                 self.face_pts_t, landmarks, self.c_mtx, self.c_dist, rvec, tvec, True
             )
-        head_euler = GetEuler(rvec, tvec)
+        head_euler = compute_euler(rvec, tvec)
         return rvec, tvec, head_euler
 
     def __call__(self, image, landmarks):
