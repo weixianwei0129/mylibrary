@@ -1,8 +1,4 @@
 import cv2
-import numpy as np
-from PIL import Image
-from PyQt5 import uic
-from PyQt5 import QtCore
 from PyQt5.QtGui import QImage, QPixmap, QDesktopServices
 from PyQt5.QtWidgets import QWidget, QFileDialog, QApplication, QMessageBox
 

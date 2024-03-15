@@ -1,7 +1,7 @@
 import os
 import cv2
 import glob
-import wxw.common as cm
+
 
 def video2images(args):
     """

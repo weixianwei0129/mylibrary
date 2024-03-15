@@ -7,7 +7,6 @@ import random
 import base64
 import shutil
 import hashlib
-import requests
 import numpy as np
 from io import BytesIO
 from functools import partial
@@ -70,22 +69,50 @@ def img2str(img):
     return base64.b64encode(base64_str).decode()
 
 
-def pad_image(img, target=None, value=(0, 0, 0), centre=True):
+def pad_image(img, target=None, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), centre=True):
     height, width = img.shape[:2]
-    long_side = max(height, width)
     if target is None:
-        t_h = t_w = long_side
+        t_h = t_w = max(height, width)
+    else:
+        if isinstance(target, int):
+            t_h = t_w = target
+        else:
+            t_w, t_h = target
+    top, left = 0, 0
+    if centre:
+        top = max((t_h - height) // 2, 0)
+        left = max((t_w - width) // 2, 0)
+    bottom, right = max(t_h - height - top, 0), max(t_w - width - left, 0)
+    if board_type == cv2.BORDER_CONSTANT:
+        img = cv2.copyMakeBorder(
+            img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=value
+        )
+    else:
+        img = cv2.copyMakeBorder(
+            img, top, bottom, left, right, borderType=board_type
+        )
+    return img, left, top
+
+
+def random_pad_image(img, target, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)):
+    height, width = img.shape[:2]
+    if isinstance(target, int):
+        t_h = t_w = target
     else:
         t_w, t_h = target
     top, left = 0, 0
-    if centre:
-        top = (t_h - height) // 2
-        left = (t_w - width) // 2
-    bottom, right = t_h - height - top, t_w - width - left
+    bottom, right = max(t_h - height - top, 0), max(t_w - width - left, 0)
+    if bottom - top > 1:
+        top = np.random.randint(0, bottom)
+        bottom -= top
+    if right - left > 1:
+        left = np.random.randint(0, right)
+        right -= left
     img = cv2.copyMakeBorder(
-        img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=value
+        img, top, bottom, left, right, borderType=board_type
     )
-    return img, left, top
+    img, x, y = pad_image(img, target, centre=False, board_type=board_type, value=value)
+    return img, left + x, top + y
 
 
 def divisibility(a, r=32):
@@ -102,7 +129,12 @@ def size_pre_process(img, longest=4096, **kwargs):
     align_fun = partial(divisibility, r=kwargs.get('align', 32))
     h, w = img.shape[:2]
     if "hard" in kwargs:
-        rw = rh = align_fun(kwargs["hard"])
+        if isinstance(kwargs["hard"], int):
+            rw = rh = align_fun(kwargs["hard"])
+        else:
+            rw, rh = kwargs["hard"]
+            rw = align_fun(rw)
+            rh = align_fun(rh)
     elif "short" in kwargs:
         short = kwargs["short"]
         if h > w:
@@ -223,10 +255,14 @@ def put_text(
     en_path = fm.findfont(fm.FontProperties(family="Arial"))
     font = ImageFont.truetype(en_path, int(tl))
     if is_chinese(text):
-        if not os.path.exists(chinese_font):
-            print(f"有中文, 但没有对应的字体 {chinese_font}. ")
-        else:
+        if os.path.exists(chinese_font):
             font = ImageFont.truetype(chinese_font, int(tl))
+        else:
+            chinese_font = fm.findfont(fm.FontProperties(family="simhei"))
+            if os.path.exists(chinese_font):
+                font = ImageFont.truetype(chinese_font, int(tl))
+            else:
+                print(f"有中文, 但没有对应的字体 {chinese_font}. ")
 
     # ==========offset position=======
     x1, y1 = np.array(pts, dtype=int)
@@ -271,6 +307,7 @@ def put_text(
 
 
 def download_image_from_url(image_url):
+    import requests
     response = requests.get(image_url)
     image = Image.open(BytesIO(response.content))
     img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -313,7 +350,7 @@ def multi_download(all_info, num_thread, func, **kwargs):
         pool.map(partial(func, **kwargs), in_args)
 
 
-def timer(func):
+def cost_time(func):
     def wrapper(*args, **kwargs):
         t = time.perf_counter()
         result = func(*args, **kwargs)
@@ -1004,7 +1041,7 @@ def draw_gaze_with_k(
         cv2.LINE_AA,
         tipLength=0.2,
     )
-    k = dy / dx
+    k = np.rad2deg(np.arctan2(dy, dx))
     return image, k
 
 
@@ -1141,3 +1178,18 @@ class NormalWarp:
         # ---------裁剪人脸图片---------
         face_image = cv2.warpPerspective(image, w_mtx, self.roiSize)
         return face_image, m_mtx, w_mtx
+
+
+def image_norm(image):
+    image = (image - np.min(image)) / (np.max(image) - np.min(image) + 1e-3)
+    return (image * 255).astype(np.uint8)
+
+
+### ===========测试============
+def print_format(string, a, func, b):
+    format = f"{a:<5.3f} {func} {b:<5.3f}"
+    if func == '/':
+        b = b + 1e-4
+    c = eval(f"{a} {func} {b}")
+    print(f"{string:<20}: {format} = {c:.3f}")
+    return c

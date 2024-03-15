@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='wxw',  # 库的名称
-    version='0.1.4',  # 版本号
+    version='0.1.5',  # 版本号
     keywords=['pip', 'wxw'],
     description='A library for wxw',  # 简要描述
     long_description="Includes some ways to work with pictures, add qt utils",
@@ -12,5 +12,5 @@ setup(
 
     packages=find_packages(),  # 需要打包的目录列表
     platforms="any",
-    install_requires=["numpy", "opencv-python", "matplotlib"]  # 这个项目依赖的第三方库
+    install_requires=["numpy", "opencv-python", "matplotlib", "Pillow==9.5.0"]  # 这个项目依赖的第三方库
 )
