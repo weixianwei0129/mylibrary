@@ -133,7 +133,7 @@ def weights_init(m):
     normal_layers = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)
     bn_layers = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)
     if isinstance(m, normal_layers):
-        nn.init.xavier_normal(m.weight)
+        nn.init.xavier_normal_(m.weight)
         if m.bias is not None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, bn_layers):
@@ -145,3 +145,19 @@ def weights_init(m):
     elif classname.find('BatchNorm') != -1:
         m.weight.data.normal_(1.0, 0.02)
         m.bias.data.fill_(0)
+
+
+def compute_gflops(model, input_size):
+    # =========FLOPS===========
+    from thop import profile
+    if isinstance(input_size, int):
+        input_size = (input_size, input_size)
+    inputs = torch.randn(1, 3, *input_size).to(model.device)
+    macs, params = profile(model, inputs=(inputs,))
+    print('FLOPs = ' + str(macs / 1000 ** 3) + 'G')
+    print('Params = ' + str(params / 1000 ** 2) + 'M')
+
+
+def compute_onnx_gflops(path):
+    import onnx_tool
+    onnx_tool.model_profile(path)

@@ -236,7 +236,7 @@ def is_chinese(string):
 def put_text(
         im0,
         text,
-        pts,
+        pts=None,
         bg_color=None,
         text_color=None,
         tl=None,
@@ -248,6 +248,9 @@ def put_text(
     alpha: 不透明度
     """
     # ============config========
+    is_gray = im0.ndim > 2
+    if pts is None:
+        pts = (0, 0)
     if bg_color is None:
         bg_color = (0, 0, 0)
     if text_color is None:
@@ -300,13 +303,17 @@ def put_text(
                 (right_bottom_x, right_bottom_y + 1),
                 bg_color, -1, cv2.LINE_AA
             )
-        img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        if is_gray:
+            img_pillow = Image.fromarray(img)
+        else:
+            img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(img_pillow)
         draw.text((left_top_x, left_top_y), text, font=font, fill=text_color)
-        img = cv2.cvtColor(np.asarray(img_pillow), cv2.COLOR_RGB2BGR)
+        img = np.asarray(img_pillow)
+        if not is_gray:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         x1, y1 = left_top_x, right_bottom_y + 1
-    im0 = cv2.addWeighted(im0, (1 - alpha), img, alpha, 0)
-    return im0
+    return img
 
 
 def download_image_from_url(image_url):
