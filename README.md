@@ -5,5 +5,5 @@
 ## Release
 ```commandline
 python setup.py sdist
-
+twine upload dist/wxw-x.x.x.tar.gz --verbose
 ```
