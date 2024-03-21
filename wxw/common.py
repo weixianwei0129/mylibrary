@@ -70,6 +70,7 @@ def img2str(img):
 
 
 def pad_image(img, target=None, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), centre=True):
+    """"""
     height, width = img.shape[:2]
     if target is None:
         t_h = t_w = max(height, width)
@@ -95,6 +96,7 @@ def pad_image(img, target=None, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0),
 
 
 def random_pad_image(img, target, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)):
+    """"""
     height, width = img.shape[:2]
     if isinstance(target, int):
         t_h = t_w = target
@@ -116,6 +118,7 @@ def random_pad_image(img, target, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0
 
 
 def divisibility(a, r=32):
+    """整除"""
     if r == 1:
         return int(a)
     return int(np.ceil(a / r) * r)
@@ -164,7 +167,7 @@ def size_pre_process(img, longest=4096, **kwargs):
         rw = longest
     if rh > longest:
         print(f"rh({rh}->{longest})")
-        rh = logging
+        rh = longest
     interpolation = kwargs.get("interpolation", None)
     if interpolation is None:
         if rw * rh > h * w:
@@ -314,42 +317,6 @@ def download_image_from_url(image_url):
     return img
 
 
-def make_img_smaller(img, height):
-    if height is not None and img.shape[0] > height:
-        img = size_pre_process(img, height=height)
-    return img
-
-
-def multi_download(all_info, num_thread, func, **kwargs):
-    """
-
-    Args:
-        all_info:
-        num_thread:
-        **kwargs:
-
-    Returns:
-
-    """
-    if num_thread == 1:
-        func([0, all_info], **kwargs)
-    else:
-        begin = 0
-        total = len(all_info)
-        interval = int(np.ceil(total / num_thread))
-        end = interval
-
-        in_args = []
-        index = 0
-        while begin < total:
-            in_args.append([index, all_info[begin:end]])
-            begin += interval
-            end += interval
-            index += 1
-        pool = Pool(num_thread)
-        pool.map(partial(func, **kwargs), in_args)
-
-
 def cost_time(func):
     def wrapper(*args, **kwargs):
         t = time.perf_counter()
@@ -464,18 +431,6 @@ def move_txt_jpg(path, dst_folder, copy=True, do=False):
                 shutil.move(src, dst)
         else:
             print(src, dst)
-
-
-def delete_txt_jpg(path, do=False):
-    prefix = os.path.splitext(path)[0]
-    dirname = os.path.dirname(prefix)
-    basename = os.path.basename(prefix)
-    for postfix in [".txt", ".jpg"]:
-        src = os.path.join(dirname, basename + postfix)
-        if do:
-            os.remove(src)
-        else:
-            print("delete: ", src)
 
 
 class LabelObject(object):
@@ -730,7 +685,7 @@ def letterbox(
     return im, ratio, (dw, dh)
 
 
-def make_labelme_json(img, basename, shapes):
+def create_labelme_json(img, basename, shapes):
     base64_str = cv2.imencode(".jpg", img)[1]
     height, width = img.shape[:2]
     return {
@@ -803,12 +758,6 @@ def estimate_norm(lmk, image_size=112):
 
 
 def norm_crop(img, landmark, image_size=112):
-    M = estimate_norm(landmark, image_size)
-    warped = cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)
-    return warped
-
-
-def norm_crop2(img, landmark, image_size=112):
     M = estimate_norm(landmark, image_size)
     warped = cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)
     return warped, M
@@ -954,54 +903,6 @@ def pixel2d2camera3d_numpy(p_uv, z, mtx, dist):
     pc_xy1 = np.matmul(np.linalg.inv(mtx), homo_uv1)[..., 0]  # [N, 3, 1]
     pc_xyz = pc_xy1 * z[:, None]  # z shape : (N, )
     return pc_xyz, z
-
-
-def calibrate_single_camera(pattern, height, width, cols, rows, wk=-1):
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-    # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-    obj_p = np.zeros((rows * cols, 3), np.float32)
-    obj_p[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2)
-    if isinstance(pattern, str):
-        all_path = glob.glob(pattern)
-        all_path.sort()
-    elif isinstance(pattern, list):
-        all_path = pattern
-    else:
-        raise TypeError(pattern)
-    # Arrays to store object points and image points from all the images.
-    obj_points = []  # 3d point in real world space
-    img_points = []  # 2d points in left image plane.
-    total = 0
-    for path in all_path:
-        img = cv2.imread(path)[:height, :width, :]
-
-        # Using OpenCV
-        # Find the chess board corners
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        ret, corners = cv2.findChessboardCorners(gray, (cols, rows), None)
-
-        if ret:
-            total += 1
-            corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-            obj_points.append(obj_p)
-            img_points.append(corners)
-
-            if wk >= 0:
-                print(path)
-                img = cv2.drawChessboardCorners(img, (cols, rows), corners, ret)
-        if wk >= 0:
-            cv2.imshow("draw", img)
-            cv2.waitKey(wk)
-    print("Using...", total)
-    ret, mtx, dist, r_vecs, t_vecs = cv2.calibrateCamera(
-        obj_points, img_points, (width, height), None, None
-    )
-    print("CameraCalibrate:")
-    print("MRS: ", ret)
-    print(mtx)
-    print(dist)
-    print("=" * 40)
-    return ret, mtx, dist
 
 
 def write_img_and_txt(split_name, img, text):
