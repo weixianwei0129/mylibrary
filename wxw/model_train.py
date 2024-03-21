@@ -1,9 +1,12 @@
 import os
+import math
 import torch
 import random
 import numpy as np
+from torch import nn
 from collections import defaultdict
 import torch.backends.cudnn as cudnn
+from torch.optim.lr_scheduler import LambdaLR
 
 
 def set_random_seed(seed=123456, deterministic=False):
@@ -24,7 +27,7 @@ def set_random_seed(seed=123456, deterministic=False):
 
 
 class LogHistory:
-    def __init__(self, log_dir):
+    def __init__(self, log_dir='./'):
         from torch.utils.tensorboard import SummaryWriter
         self.log_dir = log_dir
         os.makedirs(self.log_dir, exist_ok=True)
@@ -41,20 +44,20 @@ class LogHistory:
             print(why)
             pass
 
-    def update_info(self, info, epoch):
+    def update_info(self, info, step):
         for name, value in info.items():
             if np.isscalar(value):
-                self.add_scalar(name, value, epoch)
+                self.add_scalar(name, value, step)
             elif type(value) in [torch.Tensor]:
-                self.add_image(name, value, epoch)
+                self.add_image(name, value, step)
             else:
                 raise TypeError(f"{name}: {type(value)}, {value}")
 
-    def add_scalar(self, name, value, epoch):
-        self.writer.add_scalar(name, value, epoch)
+    def add_scalar(self, name, value, step):
+        self.writer.add_scalar(name, value, step)
 
-    def add_image(self, name, images, epoch):
-        self.writer.add_images(name, images, epoch)
+    def add_image(self, name, images, step):
+        self.writer.add_images(name, images, step)
 
 
 def smart_optimizer(model, name="Adam", lr=0.001, momentum=0.9, decay=1e-5):
@@ -112,3 +115,33 @@ def smart_lr(warm, lr_init, lrf, epochs, cycle):
             if 0 < x < warm
             else (1 - (x - warm) / (epochs - warm)) * (1 - lr_min) + lr_min
         )
+
+
+def warmup_cos_lr(optimizer, warmup_epochs, total_epochs):
+    # 定义学习率调度器的lambda函数，用于实现warmup
+    def lr_lambda(current_epoch):
+        if current_epoch < warmup_epochs:
+            return float(current_epoch) / float(max(1, warmup_epochs))
+        else:
+            return 0.5 * (
+                    1 + math.cos((current_epoch - warmup_epochs) / (total_epochs - warmup_epochs + 1e-4) * math.pi))
+
+    return LambdaLR(optimizer, lr_lambda)
+
+
+def weights_init(m):
+    normal_layers = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)
+    bn_layers = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)
+    if isinstance(m, normal_layers):
+        nn.init.xavier_normal(m.weight)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, bn_layers):
+        nn.init.ones_(m.weight)
+        nn.init.zeros_(m.bias)
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        m.weight.data.normal_(0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
