@@ -201,8 +201,8 @@ def get_offset_coordinates(v1, v2, v_min, v_max):
     v1 = max(v_min, v1)
     v1_sub = max(0, v2 - v_max)
     v2 = min(v_max, v2)
-    v1 -= v1_sub
-    v2 += v2_add
+    v1 = max(v1 - v1_sub, 0)
+    v2 = min(v2_add, v2)
     return v1, v2
 
 
@@ -226,50 +226,91 @@ def imwrite(path, img):
     cv2.imwrite(path, img)
 
 
-def is_chinese(string):
+def has_chinese(string):
     for ch in string:
         if "\u4e00" <= ch <= "\u9fff":
             return True
     return False
 
 
-def put_text(
-        im0,
-        text,
-        pts=None,
-        bg_color=None,
-        text_color=None,
-        tl=None,
-        chinese_font="resource/Songti.ttc",
-        alpha=1.0
-):
-    """
+def write_chinese_text(image, text):
+    pass
 
-    alpha: 不透明度
-    """
-    # ============config========
-    is_gray = im0.ndim > 2
-    if pts is None:
-        pts = (0, 0)
-    if bg_color is None:
-        bg_color = (0, 0, 0)
-    if text_color is None:
-        text_color = (255, 255, 255)
-    height, width = im0.shape[:2]
-    if tl is None:
-        tl = round(0.02 * np.sqrt(height ** 2 + width ** 2)) + 1
+
+def put_text_using_opencv(img, pts, text, tl, bg_color, text_color):
+    img = np.ascontiguousarray(img)
+    height, width = img.shape[:2]
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = tl / 30
+    thickness = 1
+    # ==========offset position=======
+    x1, y1 = np.array(pts, dtype=int)
+    x2, y2 = x1, y1
+    font_sizes = []
+    texts = text.replace('\r', '\n').split('\n')
+    cur_texts = []
+    (c_w, c_h), baseline = cv2.getTextSize('1234567890gj', font, font_scale, thickness)
+    c_h = int(c_h + baseline)
+    c_w = int(c_w / 12)
+    for text in texts:
+        cur_text = [text]
+        while cur_text:
+            text = cur_text.pop()
+            if len(text) == 0:
+                continue
+            t_w, t_h = c_w * len(text), c_h
+            if t_w > width and len(text) > 1:
+                # 获取一个字符的
+                mid = max(int(width / c_w), 1)
+                cur_text.append(text[mid:])
+                cur_text.append(text[:mid])
+            else:
+                x2 = max(x2, x1 + t_w)
+                y2 += t_h + 2
+                font_sizes.append([t_w, t_h])
+                cur_texts.append(text)
+
+    x1, _ = get_offset_coordinates(x1, x2, 0, width)
+    y1, _ = get_offset_coordinates(y1, y2, 0, height)
+
+    for text, (tw, th) in zip(cur_texts, font_sizes):
+        left_x, right_x = x1, x1 + tw
+        top_y, bottom_y = y1, y1 + th
+        if bg_color != -1:
+            try:
+                cv2.rectangle(
+                    img, (left_x - 1, top_y),
+                    (right_x + 1, bottom_y),
+                    bg_color, -1, cv2.LINE_AA
+                )
+            except:
+                print((left_x - 1, top_y),
+                    (right_x + 1, bottom_y))
+        cv2.putText(
+            img, text, (left_x, bottom_y - baseline),
+            font, font_scale, text_color, thickness
+        )
+        x1, y1 = left_x, bottom_y + 1
+    return img
+
+
+def put_text_use_pillow(img, pts, text, tl, bg_color, text_color, zh_font_path):
     en_path = fm.findfont(fm.FontProperties(family="Arial"))
     font = ImageFont.truetype(en_path, int(tl))
-    if is_chinese(text):
-        if os.path.exists(chinese_font):
-            font = ImageFont.truetype(chinese_font, int(tl))
+    if os.path.exists(zh_font_path):
+        font = ImageFont.truetype(zh_font_path, int(tl))
+    else:
+        zh_font_path = fm.findfont(fm.FontProperties(family="simhei"))
+        if os.path.exists(zh_font_path):
+            font = ImageFont.truetype(zh_font_path, int(tl))
         else:
-            chinese_font = fm.findfont(fm.FontProperties(family="simhei"))
-            if os.path.exists(chinese_font):
-                font = ImageFont.truetype(chinese_font, int(tl))
-            else:
-                print(f"有中文, 但没有对应的字体 {chinese_font}. ")
+            print("有中文, 但没有对应的字体.")
+            font = None
+    if font is None:
+        return put_text_using_opencv(img, pts, text, tl, bg_color, text_color)
 
+    height, width = img.shape[:2]
+    is_gray = img.ndim == 2
     # ==========offset position=======
     x1, y1 = np.array(pts, dtype=int)
     x2, y2 = x1, y1
@@ -280,20 +321,25 @@ def put_text(
         cur_text = [text]
         while cur_text:
             text = cur_text.pop()
-            if text:
-                tw, th = font.getsize(text)
-                if tw > width:
-                    mid = int(width / (font.getsize(text[0])[0] + 1))
-                    cur_text.append(text[mid:])
-                    cur_text.append(text[:mid])
-                else:
-                    x2 = max(x2, x1 + tw)
-                    y2 += th + 2
-                    font_sizes.append([tw, th])
-                    cur_texts.append(text)
+            if len(text) == 0:
+                continue
+            tw, th = font.getsize(text)
+            if tw > width and len(text) > 1:
+                mid = max(int(width / (tw / len(text))), 1)
+                cur_text.append(text[mid:])
+                cur_text.append(text[:mid])
+            else:
+                x2 = max(x2, x1 + tw)
+                y2 += th + 2
+                font_sizes.append([tw, th])
+                cur_texts.append(text)
     x1, _ = get_offset_coordinates(x1, x2, 0, width)
     y1, _ = get_offset_coordinates(y1, y2, 0, height)
-    img = im0.copy()
+    if is_gray:
+        img_pillow = Image.fromarray(img)
+    else:
+        img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(img_pillow)
     for text, (tw, th) in zip(cur_texts, font_sizes):
         left_top_x, left_top_y = x1, y1
         right_bottom_x, right_bottom_y = x1 + tw, y1 + th
@@ -303,16 +349,41 @@ def put_text(
                 (right_bottom_x, right_bottom_y + 1),
                 bg_color, -1, cv2.LINE_AA
             )
-        if is_gray:
-            img_pillow = Image.fromarray(img)
-        else:
-            img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        draw = ImageDraw.Draw(img_pillow)
         draw.text((left_top_x, left_top_y), text, font=font, fill=text_color)
-        img = np.asarray(img_pillow)
-        if not is_gray:
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         x1, y1 = left_top_x, right_bottom_y + 1
+    img = np.asarray(img_pillow)
+    if not is_gray:
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    return img
+
+
+def put_text(
+        im0,
+        text,
+        pts=None,
+        bg_color=None,
+        text_color=None,
+        tl=None,
+        zh_font_path="resource/Songti.ttc",
+):
+    # ============config========
+    is_gray = im0.ndim == 2
+    if pts is None:
+        pts = (0, 0)
+    if bg_color is None:
+        bg_color = (0, 0, 0)
+    if text_color is None:
+        text_color = 255 if is_gray else (255, 255, 255)
+    height, width = im0.shape[:2]
+    if tl is None:  # base 30 for pillow equal 1 for opencv
+        tl = round(0.02 * np.sqrt(height ** 2 + width ** 2)) + 1
+    has_chinese_char = has_chinese(text)
+
+    # ==========write===========
+    if has_chinese_char:
+        img = put_text_use_pillow(im0, pts, text, tl, bg_color, text_color, zh_font_path)
+    else:
+        img = put_text_using_opencv(im0, pts, text, tl, bg_color, text_color)
     return img
 
 
