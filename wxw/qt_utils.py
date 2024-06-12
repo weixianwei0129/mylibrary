@@ -1,4 +1,9 @@
+import os
 import cv2
+try:
+    os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH")
+except:
+    pass
 from PyQt5.QtGui import QImage, QPixmap, QDesktopServices
 from PyQt5.QtWidgets import QWidget, QFileDialog, QApplication, QMessageBox
 

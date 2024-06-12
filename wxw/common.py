@@ -40,7 +40,7 @@ class ONNXRunner:
                 {self.session.get_inputs()[0].name: img},
             )
         except Exception as e:
-            print("ONNXRunner why?: ")
+            print("[ONNXRunner] why?: ")
             print(e)
             print(self.session.get_inputs()[0])
             print(img.shape)
@@ -163,10 +163,10 @@ def size_pre_process(img, longest=4096, **kwargs):
     else:
         return None
     if rw > longest:
-        print(f"rw({rw}->{longest})")
+        print(f"[size_pre_process] rw({rw}->{longest})")
         rw = longest
     if rh > longest:
-        print(f"rh({rh}->{longest})")
+        print(f"[size_pre_process] rh({rh}->{longest})")
         rh = longest
     interpolation = kwargs.get("interpolation", None)
     if interpolation is None:
@@ -196,14 +196,90 @@ def paint_chinese_opencv(im, text, tl, pos, color):
     return img, size
 
 
-def get_offset_coordinates(v1, v2, v_min, v_max):
-    v2_add = max(0, v_min - v1)
-    v1 = max(v_min, v1)
-    v1_sub = max(0, v2 - v_max)
-    v2 = min(v_max, v2)
-    v1 = max(v1 - v1_sub, 0)
-    v2 = min(v2_add, v2)
-    return v1, v2
+# cv2转base64
+def cv2_to_base64(img):
+    img = cv2.imencode('.jpg', img)[1]
+    image_code = str(base64.b64encode(img))[2:-1]
+
+    return image_code
+
+
+def create_labelme_content(img, png_path, shapes=[], labelme_version="5.0.1"):
+    # # Convert the image to base64
+    # with open(png_path, "rb") as image_file:
+    #     encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+    encoded_string = cv2_to_base64(img)
+    img_height, img_width = img.shape[:2]
+
+    # Create the base_info dictionary
+    base_info = {
+        "version": labelme_version,
+        "flags": {},
+        "shapes": shapes,
+        "imagePath": os.path.basename(png_path),
+        "imageData": encoded_string,
+        "imageHeight": img_height,
+        "imageWidth": img_width
+    }
+    return base_info
+
+
+def create_labelme_file(png_path, labelme_version="5.0.1"):
+    json_path = os.path.splitext(png_path)[0] + '.json'
+    if os.path.exists(json_path):
+        return
+    # Read the image
+    img = cv2.imread(png_path)
+
+    # Create the base_info dictionary
+    base_info = create_labelme_content(img, png_path, labelme_version=labelme_version)
+
+    # Write the base_info dictionary to a json file
+    with open(json_path, 'w') as json_file:
+        json.dump(base_info, json_file)
+
+
+def make_labelme_shape(label: str, pts, stype: str):
+    pts = np.reshape(pts, [-1, 2]).squeeze().tolist()
+    return {
+        "label": label,
+        "points": pts,
+        "group_id": None,
+        "shape_type": stype,
+        "flags": {}
+    }
+
+
+def get_offset_coordinates(start_point, end_point, min_value, max_value):
+    """
+    Adjusts the start and end points of a line segment to ensure they fall within the specified range.
+    If the length of the line segment is greater than the range, a warning is printed and the original points are returned.
+
+    Parameters:
+    start_point (float): The initial start point of the line segment.
+    end_point (float): The initial end point of the line segment.
+    min_value (float): The minimum allowable value.
+    max_value (float): The maximum allowable value.
+
+    Returns:
+    tuple: The adjusted start and end points of the line segment.
+    """
+    if end_point - start_point > max_value - min_value:
+        print(
+            f"[get_offset_coordinates] warning: "
+            f"end_point - start_point > max_value - min_value: "
+            f"{end_point - start_point} > {max_value - min_value}"
+        )
+        return start_point, end_point
+
+    end_offset = max(0, min_value - start_point)
+    start_point = max(min_value, start_point)
+    start_offset = max(0, end_point - max_value)
+    end_point = min(max_value, end_point)
+    start_point = max(start_point - start_offset, min_value)
+    end_point = min(end_point + end_offset, max_value)
+
+    return start_point, end_point
 
 
 def imshow(name, img, t=0, cmp=113):
@@ -284,8 +360,7 @@ def put_text_using_opencv(img, pts, text, tl, bg_color, text_color):
                     bg_color, -1, cv2.LINE_AA
                 )
             except:
-                print((left_x - 1, top_y),
-                    (right_x + 1, bottom_y))
+                print("[put_text_using_opencv]: ", (left_x - 1, top_y), (right_x + 1, bottom_y))
         cv2.putText(
             img, text, (left_x, bottom_y - baseline),
             font, font_scale, text_color, thickness
@@ -304,7 +379,7 @@ def put_text_use_pillow(img, pts, text, tl, bg_color, text_color, zh_font_path):
         if os.path.exists(zh_font_path):
             font = ImageFont.truetype(zh_font_path, int(tl))
         else:
-            print("有中文, 但没有对应的字体.")
+            print("[put_text_use_pillow]: 有中文, 但没有对应的字体.")
             font = None
     if font is None:
         return put_text_using_opencv(img, pts, text, tl, bg_color, text_color)
@@ -366,6 +441,7 @@ def put_text(
         tl=None,
         zh_font_path="resource/Songti.ttc",
 ):
+    text = str(text)
     # ============config========
     is_gray = im0.ndim == 2
     if pts is None:
@@ -380,6 +456,7 @@ def put_text(
     has_chinese_char = has_chinese(text)
 
     # ==========write===========
+    im0 = np.ascontiguousarray(im0)
     if has_chinese_char:
         img = put_text_use_pillow(im0, pts, text, tl, bg_color, text_color, zh_font_path)
     else:
@@ -499,16 +576,29 @@ def move_txt_jpg(path, dst_folder, copy=True, do=False):
     prefix = os.path.splitext(path)[0]
     dirname = os.path.dirname(prefix)
     basename = os.path.basename(prefix)
-    for postfix in [".txt", ".jpg"]:
+    for postfix in [".txt", ".jpg", ".png"]:
         src = os.path.join(dirname, basename + postfix)
-        dst = os.path.join(dst_folder, basename + postfix)
-        if do:
-            if copy:
-                shutil.copy(src, dst)
+        if os.path.exists(src):
+            dst = os.path.join(dst_folder, basename + postfix)
+            if do:
+                if copy:
+                    shutil.copy(src, dst)
+                else:
+                    shutil.move(src, dst)
             else:
-                shutil.move(src, dst)
-        else:
-            print(src, dst)
+                print("[move_txt_jpg]: ", src, dst)
+
+
+def save_txt_jpg(path, image, content):
+    post_fix = os.path.splitext(path)[-1]
+    jpg_path = path.replace(post_fix, '.png')
+    imwrite(jpg_path, image)
+    if content is None:
+        return jpg_path, None
+    txt_path = path.replace(post_fix, '.txt')
+    with open(txt_path, 'w') as fo:
+        fo.writelines(content)
+    return jpg_path, txt_path
 
 
 class LabelObject(object):
@@ -521,12 +611,16 @@ class LabelObject(object):
     height = None
     width = None
 
+    def __str__(self):
+        return f"type: {self.type}, label: {self.label}"
+
 
 def parse_json(path, polygon) -> [list, np.ndarray, str]:
+    assert path.endswith('.json')
     info = json.load(open(path, "r"))
     base64_str = info.get("imageData", None)
     if base64_str is None:
-        img = cv2.imread(path.replace(".json", ".jpg"))
+        img = cv2.imread(path.replace(".json", ".png"))
     else:
         img_str = base64.b64decode(base64_str)
         np_arr = np.fromstring(img_str, np.uint8)
@@ -568,7 +662,7 @@ def parse_json_dict(path):
         info = json.load(fo)
         fo.close()
     except Exception as why:
-        print("\nwhy?\n", why)
+        print("[parse_json] \nwhy?\n", why)
         print(f"error: {path}")
         return [], None, ""
     base64_str = info.get("imageData", None)
@@ -672,13 +766,13 @@ def simplify_number(decimal):
     return string, fraction.numerator, fraction.denominator
 
 
-def rotate_image(img, angle, point=None, scale=1.0):
+def rotate_image(img, angle, point=None, scale=1.0, borderMode=cv2.BORDER_REPLICATE):
     """逆时针旋转为正"""
     height, width = img.shape[:2]
     if point is None:
         point = (width // 2, height // 2)
     rotate_mtx = cv2.getRotationMatrix2D(point, angle, scale)
-    return cv2.warpAffine(img, rotate_mtx, (width, height), borderMode=cv2.BORDER_REPLICATE)
+    return cv2.warpAffine(img, rotate_mtx, (width, height), borderMode=borderMode)
 
 
 def rotate_location(angle, rect):
@@ -777,31 +871,45 @@ def create_labelme_json(img, basename, shapes):
     }
 
 
-def show_yolo_txt(path, classes=None, colors=None, thickness=2):
+def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
     if classes is None:
         classes = {}
         for i in range(10):
             classes[i] = i
     if colors is None:
         colors = make_color_table(len(classes))
-    img = cv2.imread(path)
     mask = np.zeros_like(img)
     height, width = img.shape[:2]
-    txt = os.path.splitext(path)[0] + ".txt"
-    with open(txt, "r") as fo:
-        lines = fo.readlines()
     for line in lines:
+        if not line: continue
         sp = line.strip().split(" ")
-        idx, cx, cy, w, h = [float(x) for x in sp]
-        x1, y1, x2, y2 = (
-                xywh2xyxy([cx, cy, w, h]) * np.array([width, height, width, height])
-        ).astype(int)
+        idx, a, b, c, d = [float(x) for x in sp]
+        if xywh:
+            x1, y1, x2, y2 = (
+                    xywh2xyxy([a, b, c, d]) * np.array([width, height, width, height])
+            ).astype(int)
+        else:
+            x1, y1, x2, y2 = (
+                    np.array([a, b, c, d]) * np.array([width, height, width, height])
+            ).astype(int)
+
         if thickness == -1:
             mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)
         else:
             img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
         img = put_text(img, classes[idx], (x1, y1), (0, 0, 0), (222, 222, 222))
-    img = cv2.addWeighted(img, 0.7, mask, 0.3, 1)
+    if thickness == -1:
+        img = cv2.addWeighted(img, 0.7, mask, 0.3, 1)
+    return img
+
+
+def show_yolo_txt(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
+    img = cv2.imread(jpg_path)
+    txt = os.path.splitext(jpg_path)[0] + ".txt"
+    with open(txt, "r") as fo:
+        lines = fo.readlines()
+    img = show_yolo_label(img, lines, xywh, classes, colors, thickness)
+    img = put_text(img, os.path.basename(jpg_path))
     return img
 
 
@@ -873,7 +981,6 @@ def center_crop_rectangle(img, x1, y1, x2, y2, ratio=1.0):
     bx, ex = get_offset_coordinates(bx, ex, 0, width)
     by, ey = get_offset_coordinates(by, ey, 0, height)
     bx, by, ex, ey = [int(x) for x in [bx, by, ex, ey]]
-    # print(bx, by, ex, ey)
     return img[by:ey, bx:ex, :], bx, by
 
 
@@ -883,7 +990,6 @@ def trans_points2d(pts, M):
         pt = pts[i]
         new_pt = np.array([pt[0], pt[1], 1.0], dtype=np.float32)
         new_pt = np.dot(M, new_pt)
-        # print('new_pt', new_pt.shape, new_pt)
         new_pts[i] = new_pt[0:2]
 
     return new_pts
@@ -891,13 +997,11 @@ def trans_points2d(pts, M):
 
 def trans_points3d(pts, M):
     scale = np.sqrt(M[0][0] * M[0][0] + M[0][1] * M[0][1])
-    # print(scale)
     new_pts = np.zeros(shape=pts.shape, dtype=np.float32)
     for i in range(pts.shape[0]):
         pt = pts[i]
         new_pt = np.array([pt[0], pt[1], 1.0], dtype=np.float32)
         new_pt = np.dot(M, new_pt)
-        # print('new_pt', new_pt.shape, new_pt)
         new_pts[i][0:2] = new_pt[0:2]
         new_pts[i][2] = pts[i][2] * scale
 
@@ -1087,7 +1191,7 @@ def compute_euler(rotation_vector, translation_vector):
 
 
 class NormalWarp:
-    def __init__(self, c_mtx, c_dist, distance_norm=1000, focal_norm=1600):
+    def __init__(self, c_mtx, c_dist, distance_norm, focal_norm):
         self.c_mtx, self.c_dist = c_mtx, c_dist
         self.c_mtx_inv = np.linalg.inv(self.c_mtx)
 
@@ -1164,7 +1268,6 @@ def image_norm(image):
     return (image * 255).astype(np.uint8)
 
 
-### ===========测试============
 def print_format(string, a, func, b):
     format = f"{a:<5.3f} {func} {b:<5.3f}"
     if func == '/':
