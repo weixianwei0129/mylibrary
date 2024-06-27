@@ -47,17 +47,19 @@ class LogHistory:
     def update_info(self, info, step):
         for name, value in info.items():
             if np.isscalar(value):
-                self.add_scalar(name, value, step)
-            elif type(value) in [torch.Tensor]:
-                self.add_image(name, value, step)
+                self.writer.add_scalar(name, value, step)
+            elif torch.is_tensor(value):
+                self.writer.add_images(name, value, step)
+            elif type(value) in [list, tuple]:
+                self.add_str_list(name, value, step)
             else:
                 raise TypeError(f"{name}: {type(value)}, {value}")
 
-    def add_scalar(self, name, value, step):
-        self.writer.add_scalar(name, value, step)
-
-    def add_image(self, name, images, step):
-        self.writer.add_images(name, images, step)
+    def add_str_list(self, name, values, step):
+        for idx, value in enumerate(values):
+            if not isinstance(value, str):
+                continue
+            self.writer.add_text(f"{name}_{idx}", value, step)
 
 
 def smart_optimizer(model, name="Adam", lr=0.001, momentum=0.9, decay=1e-5):

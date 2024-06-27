@@ -17,6 +17,31 @@ from collections import defaultdict
 from PIL import Image
 from PIL import ImageFont, ImageDraw
 import matplotlib.font_manager as fm
+import warnings
+import functools
+
+print_red = lambda x: print(f"\033[31m{x}\033[0m")
+print_green = lambda x: print(f"\033[32m{x}\033[0m")
+print_yellow = lambda x: print(f"\033[32m{x}\033[0m")
+print_blue = lambda x: print(f"\033[33m{x}\033[0m")
+
+
+def norm_for_show(x):
+    return ((x - np.min(x)) / (np.max(x) - np.min(x)) * 255).astype(np.uint8)
+
+
+def deprecated(func):
+    """这是一个装饰器，用于标记函数为已弃用。当使用该函数时，会发出警告。"""
+
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # 关闭过滤器
+        warnings.warn(f"调用已弃用的函数 {func.__name__}.", category=DeprecationWarning, stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # 恢复过滤器
+        return func(*args, **kwargs)
+
+    return new_func
+
 
 np.random.seed(123456)
 random.seed(123456)
@@ -177,7 +202,14 @@ def size_pre_process(img, longest=4096, **kwargs):
     return cv2.resize(img, (rw, rh), interpolation=interpolation)
 
 
+@deprecated
 def get_img_base64(img, quality=100):
+    img_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    base64_str = cv2.imencode(".jpg", img, img_param)[1]
+    return base64.b64encode(base64_str).decode()
+
+
+def cv_img_to_base64(img, quality=100):
     img_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
     base64_str = cv2.imencode(".jpg", img, img_param)[1]
     return base64.b64encode(base64_str).decode()
@@ -196,19 +228,11 @@ def paint_chinese_opencv(im, text, tl, pos, color):
     return img, size
 
 
-# cv2转base64
-def cv2_to_base64(img):
-    img = cv2.imencode('.jpg', img)[1]
-    image_code = str(base64.b64encode(img))[2:-1]
-
-    return image_code
-
-
 def create_labelme_content(img, png_path, shapes=[], labelme_version="5.0.1"):
     # # Convert the image to base64
-    # with open(png_path, "rb") as image_file:
-    #     encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-    encoded_string = cv2_to_base64(img)
+    if img is None:
+        img = cv2.imread(png_path)
+    encoded_string = cv_img_to_base64(img)
     img_height, img_width = img.shape[:2]
 
     # Create the base_info dictionary
@@ -224,22 +248,35 @@ def create_labelme_content(img, png_path, shapes=[], labelme_version="5.0.1"):
     return base_info
 
 
-def create_labelme_file(png_path, labelme_version="5.0.1"):
+def create_labelme_file(png_path, content=None, labelme_version="5.0.1"):
     json_path = os.path.splitext(png_path)[0] + '.json'
     if os.path.exists(json_path):
         return
-    # Read the image
-    img = cv2.imread(png_path)
 
     # Create the base_info dictionary
-    base_info = create_labelme_content(img, png_path, labelme_version=labelme_version)
+    if content is None:
+        content = create_labelme_content(
+            None, png_path, [], labelme_version
+        )
 
     # Write the base_info dictionary to a json file
-    with open(json_path, 'w') as json_file:
-        json.dump(base_info, json_file)
+    with open(json_path, 'w') as fo:
+        json.dump(content, fo)
 
 
+@deprecated
 def make_labelme_shape(label: str, pts, stype: str):
+    pts = np.reshape(pts, [-1, 2]).squeeze().tolist()
+    return {
+        "label": label,
+        "points": pts,
+        "group_id": None,
+        "shape_type": stype,
+        "flags": {}
+    }
+
+
+def create_labelme_shape(label: str, pts, stype: str):
     pts = np.reshape(pts, [-1, 2]).squeeze().tolist()
     return {
         "label": label,
@@ -580,13 +617,14 @@ def move_txt_jpg(path, dst_folder, copy=True, do=False):
         src = os.path.join(dirname, basename + postfix)
         if os.path.exists(src):
             dst = os.path.join(dst_folder, basename + postfix)
-            if do:
-                if copy:
-                    shutil.copy(src, dst)
+            if not os.path.exists(dst):
+                if do:
+                    if copy:
+                        shutil.copy(src, dst)
+                    else:
+                        shutil.move(src, dst)
                 else:
-                    shutil.move(src, dst)
-            else:
-                print("[move_txt_jpg]: ", src, dst)
+                    print("[move_txt_jpg]: ", src, dst)
 
 
 def save_txt_jpg(path, image, content):
@@ -857,6 +895,7 @@ def letterbox(
     return im, ratio, (dw, dh)
 
 
+@deprecated
 def create_labelme_json(img, basename, shapes):
     base64_str = cv2.imencode(".jpg", img)[1]
     height, width = img.shape[:2]
