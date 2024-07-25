@@ -9,23 +9,6 @@ import torch.backends.cudnn as cudnn
 from torch.optim.lr_scheduler import LambdaLR
 
 
-def set_random_seed(seed=123456, deterministic=False):
-    """ Set random state to random libray, numpy, torch and cudnn.
-    Args:
-        seed: int value.
-        deterministic: bool value.
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if deterministic:
-        cudnn.deterministic = True
-        cudnn.benchmark = False
-    else:
-        cudnn.deterministic = False
-        cudnn.benchmark = True
-
-
 class LogHistory:
     def __init__(self, log_dir='./'):
         from torch.utils.tensorboard import SummaryWriter
@@ -60,6 +43,23 @@ class LogHistory:
             if not isinstance(value, str):
                 continue
             self.writer.add_text(f"{name}_{idx}", value, step)
+
+
+def set_random_seed(seed=123456, deterministic=False):
+    """ Set random state to random libray, numpy, torch and cudnn.
+    Args:
+        seed: int value.
+        deterministic: bool value.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if deterministic:
+        cudnn.deterministic = True
+        cudnn.benchmark = False
+    else:
+        cudnn.deterministic = False
+        cudnn.benchmark = True
 
 
 def smart_optimizer(model, name="Adam", lr=0.001, momentum=0.9, decay=1e-5):
