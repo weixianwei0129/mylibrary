@@ -1,3 +1,4 @@
+import collections
 import os
 import pdb
 import glob
@@ -19,7 +20,6 @@ from collections import defaultdict
 import warnings
 import functools
 from PIL import Image
-from utils import deprecated
 from PIL import ImageFont, ImageDraw
 import matplotlib.font_manager as fm
 
@@ -31,6 +31,19 @@ print_red = lambda x: print(f"\033[31m{x}\033[0m")
 print_green = lambda x: print(f"\033[32m{x}\033[0m")
 print_yellow = lambda x: print(f"\033[32m{x}\033[0m")
 print_blue = lambda x: print(f"\033[33m{x}\033[0m")
+
+
+def deprecated(func):
+    """这是一个装饰器，用于标记函数为已弃用。当使用该函数时，会发出警告。"""
+
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # 关闭过滤器
+        warnings.warn(f"调用已弃用的函数 {func.__name__}.", category=DeprecationWarning, stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # 恢复过滤器
+        return func(*args, **kwargs)
+
+    return new_func
 
 
 # ========inference=====
@@ -755,7 +768,7 @@ def norm_for_show(x):
     return ((x - np.min(x)) / (np.max(x) - np.min(x)) * 255).astype(np.uint8)
 
 
-def imshow(name, img, t=0, cmp=113):
+def imshow(name, img, ori=False, t=0, cmp=113):
     """
     name: window name
     img: ndarray
@@ -763,6 +776,10 @@ def imshow(name, img, t=0, cmp=113):
     cmp: 113 is 'q', 27 is 'esc'
     """
     if img is not None:
+        if not ori:
+            height, width = img.shape[:2]
+            if height > 2048 or width > 2048:
+                img = size_pre_process(img, long=2048)
         cv2.imshow(name, img)
     key = cv2.waitKey(t)
     if key == cmp:
@@ -868,7 +885,7 @@ class LabelObject(object):
         return f"type: {self.type}, label: {self.label}"
 
 
-def parse_json(path, polygon) -> [list, np.ndarray, str]:
+def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
     assert path.endswith('.json')
     info = json.load(open(path, "r"))
     base64_str = info.get("imageData", None)
@@ -906,44 +923,12 @@ def parse_json(path, polygon) -> [list, np.ndarray, str]:
             [image_width, image_height]
         )
     basename = osp.basename(path).split(".")[0]
+    if return_dict:
+        obj_dict = collections.defaultdict(list)
+        for obj in obj_list:
+            obj_dict[obj.label].append(obj)
+        return obj_dict, img, basename
     return obj_list, img, basename
-
-
-def parse_json_dict(path):
-    try:
-        fo = open(path, "r")
-        info = json.load(fo)
-        fo.close()
-    except Exception as why:
-        print("[parse_json] \nwhy?\n", why)
-        print(f"error: {path}")
-        return [], None, ""
-    base64_str = info.get("imageData", None)
-    all_info = defaultdict(list)
-    if base64_str is None:
-        img = None
-    else:
-        img_str = base64.b64decode(base64_str)
-        np_arr = np.fromstring(img_str, np.uint8)
-        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    if img is None:
-        image_height = info.get("imageHeight", None)
-        image_width = info.get("imageWidth", None)
-    else:
-        image_height, image_width = img.shape[:2]
-    for shape in info.get("shapes", []):
-        obj = LabelObject()
-        obj.label = shape.get("label", None)
-        obj.pts = shape.get("points", [])
-        obj.type = shape.get("shape_type", "")
-        obj.height = image_height
-        obj.width = image_width
-        # =====processed=======
-        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array(
-            [image_width, image_height]
-        )
-        all_info[obj.label].append(obj)
-    return all_info, img, osp.basename(path).split(".")[0]
 
 
 def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
@@ -1409,3 +1394,41 @@ def pixel2d2camera3d(pt_2d, z, mtx, dist):
 def image_norm(image):
     image = (image - np.min(image)) / (np.max(image) - np.min(image) + 1e-3)
     return (image * 255).astype(np.uint8)
+
+
+@deprecated
+def parse_json_dict(path):
+    try:
+        fo = open(path, "r")
+        info = json.load(fo)
+        fo.close()
+    except Exception as why:
+        print("[parse_json] \nwhy?\n", why)
+        print(f"error: {path}")
+        return [], None, ""
+    base64_str = info.get("imageData", None)
+    all_info = defaultdict(list)
+    if base64_str is None:
+        img = None
+    else:
+        img_str = base64.b64decode(base64_str)
+        np_arr = np.fromstring(img_str, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    if img is None:
+        image_height = info.get("imageHeight", None)
+        image_width = info.get("imageWidth", None)
+    else:
+        image_height, image_width = img.shape[:2]
+    for shape in info.get("shapes", []):
+        obj = LabelObject()
+        obj.label = shape.get("label", None)
+        obj.pts = shape.get("points", [])
+        obj.type = shape.get("shape_type", "")
+        obj.height = image_height
+        obj.width = image_width
+        # =====processed=======
+        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array(
+            [image_width, image_height]
+        )
+        all_info[obj.label].append(obj)
+    return all_info, img, osp.basename(path).split(".")[0]
