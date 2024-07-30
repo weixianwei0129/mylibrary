@@ -19,9 +19,9 @@ from collections import defaultdict
 
 import warnings
 import functools
-from PIL import Image
-from PIL import ImageFont, ImageDraw
 import matplotlib.font_manager as fm
+from PIL import __version__ as pl_version
+from PIL import Image, ImageFont, ImageDraw
 
 np.random.seed(123456)
 random.seed(123456)
@@ -72,6 +72,14 @@ class ONNXRunner:
 
 
 # =============基础方法===============
+
+def safe_replace(src, _old, _new):
+    dst = src.replace(_old, _new)
+    if dst == src:
+        print("no replace!")
+        return None
+    return dst
+
 
 def deprecated(func):
     """这是一个装饰器，用于标记函数为已弃用。当使用该函数时，会发出警告。"""
@@ -230,6 +238,16 @@ def random_color(amin, amax):
     g = np.random.randint(amin, amax)
     r = np.random.randint(amin, amax)
     return b, g, r
+
+
+def create_color_lst(number):
+    if number < 10:
+        colors = np.array(plt.cm.tab10.colors)
+    else:
+        colors = np.array(plt.cm.tab20.colors)
+    colors = (colors[:number - 1, ::-1] * 255).astype(np.uint8)
+    colors = np.insert(colors, 0, (0, 0, 0))
+    return colors
 
 
 def make_color_table(number):
@@ -640,7 +658,7 @@ def put_text(
         text_color = 255 if is_gray else (255, 255, 255)
     height, width = im0.shape[:2]
     if tl is None:  # base 30 for pillow equal 1 for opencv
-        tl = round(0.02 * np.sqrt(height ** 2 + width ** 2)) + 1
+        tl = round(0.05 * np.sqrt(height ** 2 + width ** 2)) + 1
     has_chinese_char = has_chinese(text)
 
     # ==========write===========
@@ -716,12 +734,11 @@ def put_text_using_opencv(img, pts, text, tl, bg_color, text_color):
 
 
 def put_text_use_pillow(img, pts, text, tl, bg_color, text_color, zh_font_path):
-    en_path = fm.findfont(fm.FontProperties(family="Arial"))
-    font = ImageFont.truetype(en_path, int(tl))
+    tl = max(tl, 10)
     if osp.exists(zh_font_path):
         font = ImageFont.truetype(zh_font_path, int(tl))
     else:
-        zh_font_path = fm.findfont(fm.FontProperties(family="simhei"))
+        zh_font_path = fm.findfont(fm.FontProperties(family="AR PL UKai CN"))
         if osp.exists(zh_font_path):
             font = ImageFont.truetype(zh_font_path, int(tl))
         else:
@@ -744,7 +761,11 @@ def put_text_use_pillow(img, pts, text, tl, bg_color, text_color, zh_font_path):
             text = cur_text.pop()
             if len(text) == 0:
                 continue
-            tw, th = font.getsize(text)
+            if pl_version < '9.5.0':  # 9.5.0 later
+                left, top, right, bottom = font.getbbox(text)
+                tw, th = right - left, bottom - top
+            else:
+                tw, th = font.getsize(text)
             if tw > width and len(text) > 1:
                 mid = max(int(width / (tw / len(text))), 1)
                 cur_text.append(text[mid:])
@@ -954,6 +975,7 @@ def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, th
         colors = make_color_table(len(classes))
     mask = np.zeros_like(img)
     height, width = img.shape[:2]
+    pts = []
     for line in lines:
         if not line: continue
         sp = line.strip().split(" ")
@@ -972,19 +994,20 @@ def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, th
         else:
             img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
         img = put_text(img, classes[idx], (x1, y1), (0, 0, 0), (222, 222, 222))
+        pts.append([idx, x1, y1, x2, y2])
     if thickness == -1:
         img = cv2.addWeighted(img, 0.7, mask, 0.3, 1)
-    return img
+    return img, pts
 
 
-def show_yolo_txt(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
+def show_yolo_file(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
     img = cv2.imread(jpg_path)
     txt = osp.splitext(jpg_path)[0] + ".txt"
     with open(txt, "r") as fo:
         lines = fo.readlines()
-    img = show_yolo_label(img, lines, xywh, classes, colors, thickness)
+    img, pts = show_yolo_label(img, lines, xywh, classes, colors, thickness)
     img = put_text(img, osp.basename(jpg_path))
-    return img
+    return img, pts
 
 
 # =========Warp face from insightface=======
@@ -1446,3 +1469,14 @@ def parse_json_dict(path):
         )
         all_info[obj.label].append(obj)
     return all_info, img, osp.basename(path).split(".")[0]
+
+
+@deprecated
+def show_yolo_txt(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
+    img = cv2.imread(jpg_path)
+    txt = osp.splitext(jpg_path)[0] + ".txt"
+    with open(txt, "r") as fo:
+        lines = fo.readlines()
+    img = show_yolo_label(img, lines, xywh, classes, colors, thickness)
+    img = put_text(img, osp.basename(jpg_path))
+    return img
