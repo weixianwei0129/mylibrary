@@ -59,7 +59,15 @@ class Face(dict):
 
 
 def read_from_json(js_path):
-    info, img, basename = cm.parse_json_dict(js_path)
+    """Read face data from a JSON file and return bounding boxes and keypoints.
+
+    Args:
+        json_path (str): Path to the JSON file.
+
+    Returns:
+        tuple: A tuple containing bounding boxes and keypoints.
+    """
+    info, img, basename = cm.parse_json(js_path, return_dict=True)
     # FIXME: 目前只能有一个脸
     bboxes = np.array(info['face'][0].pts).flatten().tolist()
     bboxes = np.reshape(bboxes + [1.0], (1, 5))
@@ -69,6 +77,16 @@ def read_from_json(js_path):
 
 
 def analyze_face(fa, img, js_path=''):
+    """Analyze faces in an image using a face analyzer model.
+
+    Args:
+        fa: The face analyzer model.
+        img (numpy.ndarray): The input image.
+        js_path (str, optional): Path to a JSON file for fallback detection. Defaults to ''.
+
+    Returns:
+        list: A list of detected faces with their attributes.
+    """
     bboxes, kpss = fa.det_model.detect(
         img,
         max_num=0,
@@ -106,16 +124,26 @@ def analyze_face(fa, img, js_path=''):
 
 
 def got_src():
-    # 图片A
+    """Select a random image, analyze the face, and return the first detected face.
+
+    This function selects a random image from the current directory, analyzes the face,
+    and returns the first detected face.
+
+    Returns:
+        dict: The first detected face's analysis result.
+    """
+    # Define the pattern to match image files
     pattern_a = "*.png"
     all_a = glob.glob(pattern_a)
+
     while True:
+        # Select a random image path
         path_a = np.random.choice(all_a)
         source_image = cv2.imread(path_a)
-        # ['bbox', 'kps', 'det_score', 'landmark_3d_68', 'pose', 'landmark_2d_106', 'gender', 'age', 'embedding']
-        # post_fix = os.path.splitext(path_a)[-1]
-        # json_a = path_a.replace(post_fix, '.json')
+
+        # Analyze the face in the image
         source_face = analyze_face(face_analyser, source_image)
+
         if len(source_face) > 0:
             return source_face[0]
 

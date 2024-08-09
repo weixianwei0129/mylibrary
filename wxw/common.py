@@ -1,80 +1,114 @@
-import collections
-import os
-import pdb
-import glob
-import cv2
-import time
-import json
-import random
-import base64
-import shutil
-import hashlib
-import numpy as np
-import os.path as osp
-from io import BytesIO
-from functools import partial
-import matplotlib.pylab as plt
-from multiprocessing import Pool
-from collections import defaultdict
-
 import argparse
-import warnings
+import base64
+import collections
 import functools
+import glob
+import hashlib
+import json
+import os
+import os.path as osp
+import random
+import shutil
+import time
+import warnings
+from collections import defaultdict
+from functools import partial
+from io import BytesIO
+from multiprocessing import Pool
+import yaml
+import cv2
 import matplotlib.font_manager as fm
+import matplotlib.pylab as plt
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 from PIL import __version__ as pl_version
-from PIL import Image, ImageFont, ImageDraw
+from functools import wraps
 
+# Set random seeds for reproducibility
 np.random.seed(123456)
 random.seed(123456)
 
-# Terminal多彩输出
-print_red = lambda x: print(f"\033[31m{x}\033[0m")
-print_green = lambda x: print(f"\033[32m{x}\033[0m")
-print_yellow = lambda x: print(f"\033[32m{x}\033[0m")
-print_blue = lambda x: print(f"\033[33m{x}\033[0m")
-
-
-def deprecated(func):
-    """这是一个装饰器，用于标记函数为已弃用。当使用该函数时，会发出警告。"""
-
-    @functools.wraps(func)
-    def new_func(*args, **kwargs):
-        warnings.simplefilter('always', DeprecationWarning)  # 关闭过滤器
-        warnings.warn(f"调用已弃用的函数 {func.__name__}.", category=DeprecationWarning, stacklevel=2)
-        warnings.simplefilter('default', DeprecationWarning)  # 恢复过滤器
-        return func(*args, **kwargs)
-
-    return new_func
-
 
 # ========inference=====
-class ONNXRunner:
-    def __init__(self, path):
-        import onnxruntime
 
+class ONNXRunner:
+    """
+    A class to run ONNX models using ONNX Runtime.
+
+    Attributes:
+        session (onnxruntime.InferenceSession): The ONNX Runtime session for inference.
+    """
+
+    def __init__(self, path):
+        """
+        Initializes the ONNXRunner with the given model path.
+
+        Args:
+            path (str): The path to the ONNX model file.
+        """
+        import onnxruntime
         providers = [
-            "CUDAExecutionProvider", 'CoreMLExecutionProvider', 'CPUExecutionProvider'
+            "CUDAExecutionProvider", "CoreMLExecutionProvider", "CPUExecutionProvider"
         ]
         self.session = onnxruntime.InferenceSession(path, providers=providers)
-        print("inputs: ", [x.name for x in self.session.get_inputs()])
-        print("outputs: ", [x.name for x in self.session.get_outputs()])
+        print("Inputs: ", [input.name for input in self.session.get_inputs()])
+        print("Outputs: ", [output.name for output in self.session.get_outputs()])
 
     def __call__(self, img):
+        """
+        Runs inference on the provided image.
+
+        Args:
+            img (numpy.ndarray): The input image for inference.
+
+        Returns:
+            list: The inference results.
+        """
         try:
             return self.session.run(
-                [x.name for x in self.session.get_outputs()],
+                [output.name for output in self.session.get_outputs()],
                 {self.session.get_inputs()[0].name: img},
             )
         except Exception as e:
-            print("[ONNXRunner] why?: ")
+            print("[ONNXRunner] Error during inference:")
             print(e)
-            print(self.session.get_inputs()[0])
-            print(img.shape)
+            print("Input details:", self.session.get_inputs()[0])
+            print("Image shape:", img.shape)
 
 
 # =============基础方法===============
+# Terminal color output functions
+def print_red(text):
+    """Print text in red color."""
+    print(f"\033[31m{text}\033[0m")
+
+
+def print_green(text):
+    """Print text in green color."""
+    print(f"\033[32m{text}\033[0m")
+
+
+def print_yellow(text):
+    """Print text in yellow color."""
+    print(f"\033[33m{text}\033[0m")
+
+
+def print_blue(text):
+    """Print text in blue color."""
+    print(f"\033[34m{text}\033[0m")
+
+
 def update_args(old_, new_) -> argparse.Namespace:
-    import yaml
+    """
+    Update the arguments from old_ with new_.
+
+    Args:
+        old_ (Union[argparse.Namespace, str, dict]): The original arguments.
+        new_ (Union[argparse.Namespace, str, dict]): The new arguments to update with.
+
+    Returns:
+        argparse.Namespace: The updated arguments as a Namespace object.
+    """
     if isinstance(old_, argparse.Namespace):
         old_ = vars(old_)
     elif isinstance(new_, argparse.Namespace):
@@ -86,33 +120,41 @@ def update_args(old_, new_) -> argparse.Namespace:
     elif isinstance(new_, str) and new_.endswith('.yaml'):
         with open(new_, 'r') as file:
             new_ = yaml.safe_load(file)
+
     assert isinstance(old_, dict) and isinstance(new_, dict)
     old_.update(new_)
     return argparse.Namespace(**old_)
 
 
-def safe_replace(src, _old, _new):
+def safe_replace(src: str, _old: str, _new: str) -> str:
+    """
+    Safely replace occurrences of _old with _new in src.
+
+    Args:
+        src (str): The source string.
+        _old (str): The substring to be replaced.
+        _new (str): The substring to replace with.
+
+    Returns:
+        str: The modified string, or None if no replacement was made.
+    """
     dst = src.replace(_old, _new)
     if dst == src:
-        print("no replace!")
+        print("No replacement made!")
         return None
     return dst
 
 
-def deprecated(func):
-    """这是一个装饰器，用于标记函数为已弃用。当使用该函数时，会发出警告。"""
+def md5sum(file_path: str) -> str:
+    """
+    Calculate the MD5 checksum of a file.
 
-    @functools.wraps(func)
-    def new_func(*args, **kwargs):
-        warnings.simplefilter('always', DeprecationWarning)  # 关闭过滤器
-        warnings.warn(f"调用已弃用的函数 {func.__name__}.", category=DeprecationWarning, stacklevel=2)
-        warnings.simplefilter('default', DeprecationWarning)  # 恢复过滤器
-        return func(*args, **kwargs)
+    Args:
+        file_path (str): The path to the file.
 
-    return new_func
-
-
-def md5sum(file_path):
+    Returns:
+        str: The MD5 checksum of the file.
+    """
     with open(file_path, "rb") as file:
         md5_hash = hashlib.md5()
         while True:
@@ -123,35 +165,56 @@ def md5sum(file_path):
     return md5_hash.hexdigest()
 
 
-def print_format(string, a, func, b):
-    format = f"{a:<5.3f} {func} {b:<5.3f}"
+def print_format(string: str, a: float, func: str, b: float) -> float:
+    """
+    Format and print a mathematical operation, then return the result.
+
+    Args:
+        string (str): The description of the operation.
+        a (float): The first operand.
+        func (str): The operator as a string (e.g., '+', '-', '*', '/').
+        b (float): The second operand.
+
+    Returns:
+        float: The result of the operation.
+    """
+    formatted_string = f"{a:<5.3f} {func} {b:<5.3f}"
     if func == '/':
-        b = b + 1e-4
+        b += 1e-4  # Avoid division by zero
     c = eval(f"{a} {func} {b}")
-    print(f"{string:<20}: {format} = {c:.3f}")
+    print(f"{string:<20}: {formatted_string} = {c:.3f}")
     return c
 
 
-def divisibility(a, r=32):
-    """整除"""
+def divisibility(a: float, r: int = 32) -> int:
+    """
+    计算a是否能被r整除，如果不能则返回大于a的最小r的倍数。
+
+    Args:
+        a (float): 要检查的数字。
+        r (int, optional): 用于整除的基数，默认为32。
+
+    Returns:
+        int: 大于或等于a的最小r的倍数。
+    """
     if r == 1:
         return int(a)
     return int(np.ceil(a / r) * r)
 
 
-def get_offset_coordinates(start_point, end_point, min_value, max_value):
+def get_offset_coordinates(start_point, end_point, min_value: float, max_value: float):
     """
-    Adjusts the start and end points of a line segment to ensure they fall within the specified range.
+    Adjust the start and end points of a line segment to ensure they fall within the specified range.
     If the length of the line segment is greater than the range, a warning is printed and the original points are returned.
 
-    Parameters:
-    start_point (float): The initial start point of the line segment.
-    end_point (float): The initial end point of the line segment.
-    min_value (float): The minimum allowable value.
-    max_value (float): The maximum allowable value.
+    Args:
+        start_point (float): The initial start point of the line segment.
+        end_point (float): The initial end point of the line segment.
+        min_value (float): The minimum allowable value.
+        max_value (float): The maximum allowable value.
 
     Returns:
-    tuple: The adjusted start and end points of the line segment.
+        tuple: The adjusted start and end points of the line segment.
     """
     if end_point - start_point > max_value - min_value:
         print(
@@ -161,9 +224,9 @@ def get_offset_coordinates(start_point, end_point, min_value, max_value):
         )
         return start_point, end_point
 
-    end_offset = max(0, min_value - start_point)
+    end_offset = max([0, min_value - start_point])
     start_point = max(min_value, start_point)
-    start_offset = max(0, end_point - max_value)
+    start_offset = max([0, end_point - max_value])
     end_point = min(max_value, end_point)
     start_point = max(start_point - start_offset, min_value)
     end_point = min(end_point + end_offset, max_value)
@@ -172,18 +235,37 @@ def get_offset_coordinates(start_point, end_point, min_value, max_value):
 
 
 def cost_time(func):
+    """
+    Decorator that measures the execution time of a function.
+
+    Args:
+        func (function): The function to be decorated.
+
+    Returns:
+        function: The wrapped function with execution time measurement.
+    """
+
+    @wraps(func)
     def wrapper(*args, **kwargs):
-        t = time.perf_counter()
+        start_time = time.perf_counter()
         result = func(*args, **kwargs)
-        print(
-            f"[INFO] [{func.__name__}] coast time:{(time.perf_counter() - t) * 1000:.4f}ms"
-        )
+        elapsed_time = (time.perf_counter() - start_time) * 1000
+        print(f"[INFO] [{func.__name__}] cost time: {elapsed_time:.4f}ms")
         return result
 
     return wrapper
 
 
 def xywh2xyxy(pts):
+    """
+    Convert bounding boxes from (center x, center y, width, height) format to (x1, y1, x2, y2) format.
+
+    Args:
+        pts (np.ndarray or list): Array of bounding boxes in (cx, cy, w, h) format.
+
+    Returns:
+        np.ndarray: Array of bounding boxes in (x1, y1, x2, y2) format.
+    """
     pts = np.reshape(pts, [-1, 4])
     cx, cy, w, h = np.split(pts, 4, 1)
     x1 = cx - w / 2
@@ -192,11 +274,19 @@ def xywh2xyxy(pts):
     y2 = cy + h / 2
     res = np.concatenate([x1, y1, x2, y2], axis=1)
     res = np.clip(res, 0, np.inf)
-    # return res[0] if pts.shape[0] == 1 else res
     return np.squeeze(res)
 
 
 def xyxy2xywh(pts):
+    """
+    Convert bounding boxes from (x1, y1, x2, y2) format to (center x, center y, width, height) format.
+
+    Args:
+        pts (np.ndarray or list): Array of bounding boxes in (x1, y1, x2, y2) format.
+
+    Returns:
+        np.ndarray: Array of bounding boxes in (cx, cy, w, h) format.
+    """
     pts = np.reshape(pts, [-1, 4])
     x1, y1, x2, y2 = np.split(pts, 4, 1)
     cx = (x1 + x2) / 2
@@ -209,6 +299,15 @@ def xyxy2xywh(pts):
 
 
 def get_min_rect(pts):
+    """
+    Get the minimum bounding rectangle for a set of points.
+
+    Args:
+        pts (np.ndarray or list): Array of points with shape (N, 2).
+
+    Returns:
+        np.ndarray: Array containing [x_min, y_min, x_max, y_max, cx, cy, w, h].
+    """
     pts = np.reshape(pts, (-1, 2))
     x_min = min(pts[:, 0])
     x_max = max(pts[:, 0])
@@ -223,8 +322,14 @@ def get_min_rect(pts):
 
 def clockwise_points(pts):
     """
-    pts:
-     [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+    Sort points in clockwise order.
+
+    Args:
+        pts (list): List of points in the format [[x1, y1], [x2, y2], [x3, y3], [x4, y4]].
+
+    Returns:
+        list: List of points sorted in clockwise order.
+
     1. 先按照x进行排序,从小到大
     2. 对前两个点,y大的为点4, 小的为点1
     3. 对后两个点,y大的为点3, 小的为点2
@@ -247,119 +352,161 @@ def clockwise_points(pts):
     return [pts[index_1], pts[index_2], pts[index_3], pts[index_4]]
 
 
-def distance(p1, p2):
-    return np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+def generate_random_color(min_value, max_value):
+    """Generate a random color.
+
+    Args:
+        min_value (int): The minimum value for the color components.
+        max_value (int): The maximum value for the color components.
+
+    Returns:
+        tuple: A tuple containing three integers representing the blue, green, and red components of the color.
+    """
+    blue = np.random.randint(min_value, max_value)
+    green = np.random.randint(min_value, max_value)
+    red = np.random.randint(min_value, max_value)
+    return blue, green, red
 
 
-def random_color(amin, amax):
-    b = np.random.randint(amin, amax)
-    g = np.random.randint(amin, amax)
-    r = np.random.randint(amin, amax)
-    return b, g, r
+def create_color_list(num_colors):
+    """Create a list of colors.
 
+    Args:
+        num_colors (int): The number of colors to generate.
 
-def create_color_lst(number):
-    if number < 10:
+    Returns:
+        np.ndarray: An array of RGB color values.
+    """
+    if num_colors < 10:
         colors = np.array(plt.cm.tab10.colors)
     else:
         colors = np.array(plt.cm.tab20.colors)
-    colors = (colors[:number - 1, ::-1] * 255).astype(np.uint8)
-    colors = np.insert(colors, 0, (0, 0, 0))
+
+    colors = (colors[:num_colors - 1, ::-1] * 255).astype(np.uint8)
+    colors = np.insert(colors, 0, (0, 0, 0), axis=0)
     return colors
 
 
-def make_color_table(number):
-    if number < 10:
-        colors = np.array(plt.cm.tab10.colors[:number]) * 255
-        colors = colors[:, ::-1].astype(np.uint8)
-    else:
-        colors = np.array(plt.cm.tab20.colors[:number]) * 255
-        colors = colors[:, ::-1].astype(np.uint8)
-    color_table = {}
-    for i in range(number):
-        color_table[i] = tuple(colors[i].tolist())
-    for i in range(number - len(color_table), number):
-        color_table[i] = random_color(127, 255)
-    return color_table
+def multi_process(process_method, data_to_process, num_threads=1):
+    """Run a method in multiple processes.
 
+    Args:
+        process_method (function): The method to be run in multiple processes.
+        data_to_process (list): The data to be processed.
+        num_threads (int, optional): The number of threads to use. Defaults to 1.
 
-def multi_process(process_method, need_process_data, num_thread=1):
+    Example:
+        def process_method(args):
+            thread_idx, data_to_process = args
+            # Processing code here
+
+        multi_process(process_method, data_to_process, num_threads=4)
     """
-    'process_method' should be:
-    def process_method(args):
-        thread_idx, need_process_data = args
-        .....
-    """
-    if num_thread == 1:
-        process_method([0, need_process_data])
+    if num_threads == 1:
+        process_method([0, data_to_process])
     else:
-        begin = 0
-        total = len(need_process_data)
-        interval = int(np.ceil(total / num_thread))
-        end = interval
+        total = len(data_to_process)
+        interval = int(np.ceil(total / num_threads))
 
-        works = []
-        index = 0
-        while begin < total:
-            index += 1
-            works.append([index, need_process_data[begin:end]])
-            begin += interval
-            end += interval
-        pool = Pool(num_thread)
-        pool.map(process_method, works)
+        tasks = []
+        for i in range(num_threads):
+            start = i * interval
+            end = min(start + interval, total)
+            tasks.append([i, data_to_process[start:end]])
+
+        with Pool(num_threads) as pool:
+            pool.map(process_method, tasks)
 
 
 def simplify_number(decimal):
+    """Convert a decimal number to its simplest fraction form.
+
+    Args:
+        decimal (float): The decimal number to be converted.
+
+    Returns:
+        tuple: A tuple containing the fraction as a string, the numerator, and the denominator.
+    """
     from fractions import Fraction
 
-    # 使用Fraction类将小数转换为最简分数
+    # Convert the decimal to the simplest fraction
     fraction = Fraction(decimal).limit_denominator()
-    # 打印最简分数形式
-    # print(f"小数：{decimal}")
-    # print(f"最简分数：{fraction.numerator}/{fraction.denominator}")
-    string = f"{fraction.numerator}/{fraction.denominator}"
-    return string, fraction.numerator, fraction.denominator
+
+    # Create a string representation of the fraction
+    fraction_string = f"{fraction.numerator}/{fraction.denominator}"
+
+    return fraction_string, fraction.numerator, fraction.denominator
 
 
 # =========Files: 文件移动和写入============
 def merge_path(path, flag):
-    sp = path.split(os.sep)
-    idx = sp.index(flag)
-    return '_'.join(sp[idx:])
+    """Merge a path from a specific flag.
+
+    Args:
+        path (str): The original path.
+        flag (str): The flag to start merging from.
+
+    Returns:
+        str: The merged path starting from the flag.
+    """
+    path_parts = path.split(os.sep)
+    flag_index = path_parts.index(flag)
+    merged_path = '_'.join(path_parts[flag_index:])
+    return merged_path
 
 
-def move_file_pairs(
+def move_file_pair(
         path,
         dst_folder,
         dst_name=None,
         postfixes=None,
         copy=True,
-        do=False,
+        execute=False,
         empty_undo=False,
-        empty_del=False
+        empty_delete=False
 ):
+    """Move or copy file pairs to a destination folder.
+
+    Args:
+        path (str): The source file path.
+        dst_folder (str): The destination folder.
+        dst_name (str, optional): The destination file name. Defaults to None.
+        postfixes (list, optional): List of postfixes to consider. Defaults to None.
+        copy (bool, optional): Whether to copy instead of move. Defaults to True.
+        execute (bool, optional): Whether to execute the move/copy. Defaults to False.
+        empty_undo (bool, optional): Whether to undo if the file is empty. Defaults to False.
+        empty_delete (bool, optional): Whether to delete the file if it is empty. Defaults to False.
+
+    Returns:
+        None
+    """
     if empty_undo and os.path.getsize(path) == 0:
-        if empty_del: os.remove(path)
+        if empty_delete:
+            os.remove(path)
         return
-    prefix, self_post = osp.splitext(path)
+
+    prefix, self_postfix = osp.splitext(path)
     if postfixes is None:
-        postfixes = [self_post]
+        postfixes = [self_postfix]
+
     src_dir = osp.dirname(prefix)
     src_name = osp.basename(prefix)
+
     if dst_name is None:
         dst_name = src_name
     else:
         for postfix in postfixes:
-            p_l_ = len(postfix)
-            if postfix == dst_name[-p_l_:]:
-                dst_name = dst_name[:-p_l_]
+            postfix_length = len(postfix)
+            if postfix == dst_name[-postfix_length:]:
+                dst_name = dst_name[:-postfix_length]
                 break
+
     for postfix in postfixes:
         src = osp.join(src_dir, src_name + postfix)
         if osp.exists(src):
             dst = osp.join(dst_folder, dst_name + postfix)
             if not osp.exists(dst):
-                if do:
+                if execute:
                     os.makedirs(dst_folder, exist_ok=True)
                     if copy:
                         shutil.copy(src, dst)
@@ -370,253 +517,375 @@ def move_file_pairs(
 
 
 def save_txt_jpg(path, image, content):
-    post_fix = osp.splitext(path)[-1]
-    jpg_path = path.replace(post_fix, '.png')
-    imwrite(jpg_path, image)
+    """Save an image as a .png file and optionally save content as a .txt file.
+
+    Args:
+        path (str): The base file path.
+        image (np.ndarray): The image to be saved.
+        content (str, optional): The content to be written to a text file. Defaults to None.
+
+    Returns:
+        tuple: A tuple containing the paths to the saved image and text file.
+    """
+    # Determine the file extension
+    file_extension = osp.splitext(path)[-1]
+
+    # Create the .png file path
+    png_path = path.replace(file_extension, '.png')
+
+    # Save the image as a .png file
+    cv2.imwrite(png_path, image)
+
     if content is None:
-        return jpg_path, None
-    txt_path = path.replace(post_fix, '.txt')
-    with open(txt_path, 'w') as fo:
-        fo.writelines(content)
-    return jpg_path, txt_path
+        return png_path, None
+
+    # Create the .txt file path
+    txt_path = path.replace(file_extension, '.txt')
+
+    # Write the content to the .txt file
+    with open(txt_path, 'w') as file:
+        file.writelines(content)
+
+    return png_path, txt_path
 
 
 # ==============图像获取================
 
 
 def plt2array():
+    """Convert a Matplotlib plot to a NumPy array.
+
+    Returns:
+        np.ndarray: The RGBA image as a NumPy array.
+    """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
-
-    # 将plt转化为numpy数据
+    # Convert the Matplotlib plot to a NumPy array
     canvas = FigureCanvasAgg(plt.gcf())
-    # 绘制图像
     canvas.draw()
-    # 获取图像尺寸
-    w, h = canvas.get_width_height()
-    # 解码string 得到argb图像
-    buf = np.fromstring(canvas.tostring_argb(), dtype=np.uint8)
 
-    # 重构成w h 4(argb)图像
-    buf.shape = (w, h, 4)
-    # 转换为 RGBA
-    buf = np.roll(buf, 3, axis=2)
-    # 得到 Image RGBA图像对象 (需要Image对象的同学到此为止就可以了)
-    image = Image.frombytes("RGBA", (w, h), buf.tobytes())
-    # 转换为numpy array rgba四通道数组
+    # Get the width and height of the canvas
+    width, height = canvas.get_width_height()
+
+    # Decode the string to get the ARGB image
+    buffer = np.frombuffer(canvas.tostring_argb(), dtype=np.uint8)
+
+    # Reshape the buffer to (width, height, 4) for ARGB
+    buffer.shape = (height, width, 4)
+
+    # Convert ARGB to RGBA
+    buffer = np.roll(buffer, 3, axis=2)
+
+    # Create an Image object from the buffer
+    image = Image.frombytes("RGBA", (width, height), buffer.tobytes())
+
+    # Convert the Image object to a NumPy array
     plt.clf()
     return np.asarray(image)
 
 
-def download_image_from_url(image_url):
-    import requests
-    response = requests.get(image_url)
-    image = Image.open(BytesIO(response.content))
-    img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-    return img
-
-
-def read_avif_img(path):
-    AVIFimg = Image.open(path)
-    img = np.array(AVIFimg)
-    return img[..., ::-1]
-
-
 def video2images(args):
-    """
-    args: [线程id: int && 全部路径: list]
+    """Extract frames from videos and save them as images.
 
-    if __name__ == "__main__":
-        pattern = "xxx/*/*/*.mp4"
-        all_data = glob.glob(pattern)
-        print("total: ", len(all_data))
-        cm.multi_process(v2f, all_data, num_thread=4)
+    Args:
+        args (list): A list containing the thread index and a list of video paths.
+
+    Example:
+        if __name__ == "__main__":
+            pattern = "xxx/*/*/*.mp4"
+            all_data = glob.glob(pattern)
+            print("total: ", len(all_data))
+            cm.multi_process(video2images, all_data, num_threads=4)
     """
-    idx, all_video = args
-    print(f"{idx} processing ", len(all_video))
-    for video in all_video:
+    thread_idx, all_videos = args
+    print(f"{thread_idx} processing ", len(all_videos))
+
+    for video in all_videos:
         folder = os.path.splitext(video)[0]
         saved = 0
+
         if os.path.exists(folder):
             saved = len(glob.glob(os.path.join(folder, "*.png")))
         else:
             os.makedirs(folder, exist_ok=True)
+
         cap = cv2.VideoCapture(video)
         index = 0
         ret, frame = cap.read()
+
         while ret:
             if index < saved:
                 ret, frame = cap.read()
                 index += 1
                 continue
+
             if index % 1 == 0:
                 new_path = os.path.join(folder, f"{str(index).zfill(5)}.png")
                 cv2.imwrite(new_path, frame)
+
             index += 1
             ret, frame = cap.read()
+
         cap.release()
-    print(f"{idx} Finished!")
+
+    print(f"{thread_idx} Finished!")
 
 
 # ===============图像处理===============
 
 
-def pad_image(img, target=None, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), centre=True):
-    """
+def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), center=True):
+    """Pad an image to a target size.
 
     Args:
-        img:
-        target:  如何没有提供target，那么短边被填充到和长边一样的尺寸
-        board_type:
-        value:
-        centre:
+        img (np.ndarray): The input image.
+        target (tuple or int, optional): The target size. If not provided, the shorter side is padded to match the longer side.
+        border_type (int, optional): The border type to use. Defaults to cv2.BORDER_CONSTANT.
+        value (tuple, optional): The border color value. Defaults to (0, 0, 0).
+        center (bool, optional): Whether to center the image. Defaults to True.
 
     Returns:
-
+        tuple: The padded image, left padding, and top padding.
     """
     height, width = img.shape[:2]
+
     if target is None:
-        t_h = t_w = max(height, width)
+        target_height = target_width = max(height, width)
     else:
         if isinstance(target, int):
-            t_h = t_w = target
+            target_height = target_width = target
         else:
-            t_w, t_h = target
+            target_width, target_height = target
+
     top, left = 0, 0
-    if centre:
-        top = max((t_h - height) // 2, 0)
-        left = max((t_w - width) // 2, 0)
-    bottom, right = max(t_h - height - top, 0), max(t_w - width - left, 0)
-    if board_type == cv2.BORDER_CONSTANT:
-        img = cv2.copyMakeBorder(
-            img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=value
-        )
+    if center:
+        top = max((target_height - height) // 2, 0)
+        left = max((target_width - width) // 2, 0)
+
+    bottom = max(target_height - height - top, 0)
+    right = max(target_width - width - left, 0)
+
+    if border_type == cv2.BORDER_CONSTANT:
+        img = cv2.copyMakeBorder(img, top, bottom, left, right, border_type, value=value)
     else:
-        img = cv2.copyMakeBorder(
-            img, top, bottom, left, right, borderType=board_type
-        )
+        img = cv2.copyMakeBorder(img, top, bottom, left, right, borderType=border_type)
+
     return img, left, top
 
 
-def random_pad_image(img, target, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)):
-    """"""
-    height, width = img.shape[:2]
-    if isinstance(target, int):
-        t_h = t_w = target
+def random_pad_image(image, target_size, border_type=cv2.BORDER_CONSTANT, border_value=(0, 0, 0)):
+    """Randomly pads an image to the target size.
+
+    Args:
+        image (numpy.ndarray): The input image to be padded.
+        target_size (int or tuple): The target size for padding. If an integer is provided, both width and height will be set to this value. If a tuple is provided, it should be in the form (width, height).
+        border_type (int, optional): Border type to be used for padding. Defaults to cv2.BORDER_CONSTANT.
+        border_value (tuple, optional): Border color value for padding. Defaults to (0, 0, 0).
+
+    Returns:
+        tuple: The padded image and the x, y coordinates of the top-left corner of the original image within the padded image.
+    """
+    height, width = image.shape[:2]
+
+    if isinstance(target_size, int):
+        target_height = target_width = target_size
     else:
-        t_w, t_h = target
+        target_width, target_height = target_size
+
     top, left = 0, 0
-    bottom, right = max(t_h - height - top, 0), max(t_w - width - left, 0)
+    bottom, right = max(target_height - height - top, 0), max(target_width - width - left, 0)
+
     if bottom - top > 1:
         top = np.random.randint(0, bottom)
         bottom -= top
+
     if right - left > 1:
         left = np.random.randint(0, right)
         right -= left
-    img = cv2.copyMakeBorder(
-        img, top, bottom, left, right, borderType=board_type
+
+    padded_image = cv2.copyMakeBorder(
+        image, top, bottom, left, right, borderType=border_type, value=border_value
     )
-    img, x, y = pad_image(img, target, centre=False, board_type=board_type, value=value)
-    return img, left + x, top + y
+
+    padded_image, x_offset, y_offset = pad_image(
+        padded_image, target_size, center=False, border_type=border_type, value=border_value
+    )
+
+    return padded_image, left + x_offset, top + y_offset
 
 
-def size_pre_process(img, longest=4096, **kwargs):
-    """kwargs
-    interpolation
+def size_pre_process(image, max_length=4096, **kwargs):
+    """Pre-processes the size of an image based on various criteria.
 
+    Args:
+        image (numpy.ndarray): The input image to be resized.
+        max_length (int, optional): The maximum allowed length for width or height. Defaults to 4096.
+        **kwargs: Additional keyword arguments for resizing criteria.
+            - interpolation (int, optional): Interpolation method for resizing. Defaults to None.
+            - align (int, optional): Alignment value for divisibility. Defaults to 32.
+            - hard (int or tuple, optional): Hard target size for resizing.
+            - short (int, optional): Target size for the shorter dimension.
+            - long (int, optional): Target size for the longer dimension.
+            - height (int, optional): Target height for resizing.
+            - width (int, optional): Target width for resizing.
+            - letterbox
+
+    Returns:
+        numpy.ndarray: The resized image.
     """
-    align_fun = partial(divisibility, r=kwargs.get('align', 32))
-    h, w = img.shape[:2]
+    align_function = partial(divisibility, r=kwargs.get('align', 32))
+    height, width = image.shape[:2]
+
     if "hard" in kwargs:
         if isinstance(kwargs["hard"], int):
-            rw = rh = align_fun(kwargs["hard"])
+            target_width = target_height = align_function(kwargs["hard"])
         else:
-            rw, rh = kwargs["hard"]
-            rw = align_fun(rw)
-            rh = align_fun(rh)
+            target_width, target_height = kwargs["hard"]
+            target_width = align_function(target_width)
+            target_height = align_function(target_height)
     elif "short" in kwargs:
-        short = kwargs["short"]
-        if h > w:
-            rw = short
-            rh = align_fun(h / w * rw)
+        short_side = kwargs["short"]
+        if height > width:
+            target_width = short_side
+            target_height = align_function(height / width * target_width)
         else:
-            rh = short
-            rw = align_fun(w / h * rh)
+            target_height = short_side
+            target_width = align_function(width / height * target_height)
     elif "long" in kwargs:
-        long = kwargs["long"]
-        if h < w:
-            rw = long
-            rh = align_fun(h / w * rw)
+        long_side = kwargs["long"]
+        if height < width:
+            target_width = long_side
+            target_height = align_function(height / width * target_width)
         else:
-            rh = long
-            rw = align_fun(w / h * rh)
+            target_height = long_side
+            target_width = align_function(width / height * target_height)
     elif "height" in kwargs:
-        rh = align_fun(kwargs["height"])
-        rw = align_fun(w / h * rh)
+        target_height = align_function(kwargs["height"])
+        target_width = align_function(width / height * target_height)
     elif "width" in kwargs:
-        rw = align_fun(kwargs["width"])
-        rh = align_fun(h / w * rw)
+        target_width = align_function(kwargs["width"])
+        target_height = align_function(height / width * target_width)
     else:
         return None
-    if rw > longest:
-        print(f"[size_pre_process] rw({rw}->{longest})")
-        rw = longest
-    if rh > longest:
-        print(f"[size_pre_process] rh({rh}->{longest})")
-        rh = longest
-    interpolation = kwargs.get("interpolation", None)
-    if interpolation is None:
-        if rw * rh > h * w:
-            interpolation = cv2.INTER_LINEAR
+
+    if target_width > max_length:
+        print(f"[size_pre_process] target_width({target_width}->{max_length})")
+        target_width = max_length
+    if target_height > max_length:
+        print(f"[size_pre_process] target_height({target_height}->{max_length})")
+        target_height = max_length
+
+    interpolation_method = kwargs.get("interpolation", None)
+    if interpolation_method is None:
+        if target_width * target_height > height * width:
+            interpolation_method = cv2.INTER_LINEAR
         else:
-            interpolation = cv2.INTER_AREA
-    return cv2.resize(img, (rw, rh), interpolation=interpolation)
+            interpolation_method = cv2.INTER_AREA
+
+    return cv2.resize(image, (target_width, target_height), interpolation=interpolation_method)
 
 
 def center_crop(image):
+    """Crops the center of the image to create a square image.
+
+    Args:
+        image (numpy.ndarray): The input image to be cropped.
+
+    Returns:
+        tuple: The cropped image and the x, y coordinates of the top-left corner of the cropped area.
+    """
     height, width = image.shape[:2]
-    side = min(height, width)
-    x = int(np.ceil((width - side) // 2))
-    y = int(np.ceil((height - side) // 2))
-    image = image[y: y + side, x: x + side, ...]
-    return image, x, y
+    side_length = min(height, width)
+    x_offset = int(np.ceil((width - side_length) // 2))
+    y_offset = int(np.ceil((height - side_length) // 2))
+    cropped_image = image[y_offset: y_offset + side_length, x_offset: x_offset + side_length, ...]
+    return cropped_image, x_offset, y_offset
 
 
-def cv_img_to_base64(img, quality=100):
-    img_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-    base64_str = cv2.imencode(".jpg", img, img_param)[1]
-    return base64.b64encode(base64_str).decode()
+def cv_img_to_base64(image, quality=100):
+    """Converts an OpenCV image to a base64 encoded string.
+
+    Args:
+        image (numpy.ndarray): The input image to be converted.
+        quality (int, optional): The quality of the JPEG encoding. Defaults to 100.
+
+    Returns:
+        str: The base64 encoded string of the image.
+    """
+    img_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    _, encoded_img = cv2.imencode(".jpg", image, img_params)
+    base64_str = base64.b64encode(encoded_img).decode()
+    return base64_str
 
 
-def warp_regions(img, box):
+def distance(point1, point2):
+    """Calculates the Euclidean distance between two points.
+
+    Args:
+        point1 (tuple): The first point (x, y).
+        point2 (tuple): The second point (x, y).
+
+    Returns:
+        float: The Euclidean distance between the two points.
+    """
+    return np.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
+
+
+def warp_regions(image, box):
+    """Warps a region of the image defined by a quadrilateral box.
+
+    Args:
+        image (numpy.ndarray): The input image to be warped.
+        box (list): A list of four points defining the quadrilateral (p0, p1, p2, p3).
+
+    Returns:
+        numpy.ndarray: The warped image region.
+    """
     p0, p1, p2, p3 = box
-    h = int(distance(p0, p3))
-    w = int(distance(p0, p1))
-    pts1 = np.float32([p0, p1, p3])
-    pts2 = np.float32([[0, 0], [w - 1, 0], [0, h - 1]])
-    return cv2.warpAffine(img, cv2.getAffineTransform(pts1, pts2), (w, h))
+    height = int(distance(p0, p3))
+    width = int(distance(p0, p1))
+    src_pts = np.float32([p0, p1, p3])
+    dst_pts = np.float32([[0, 0], [width - 1, 0], [0, height - 1]])
+    affine_matrix = cv2.getAffineTransform(src_pts, dst_pts)
+    warped_image = cv2.warpAffine(image, affine_matrix, (width, height))
+    return warped_image
 
 
-def rotate_image(img, angle, point=None, scale=1.0, borderMode=cv2.BORDER_REPLICATE):
-    """逆时针旋转为正"""
-    height, width = img.shape[:2]
-    if point is None:
-        point = (width // 2, height // 2)
-    rotate_mtx = cv2.getRotationMatrix2D(point, angle, scale)
-    return cv2.warpAffine(img, rotate_mtx, (width, height), borderMode=borderMode)
+def rotate_image(image, angle, center_point=None, scale=1.0, border_mode=cv2.BORDER_REPLICATE):
+    """Rotates an image counterclockwise by a specified angle.
+
+    Args:
+        image (numpy.ndarray): The input image to be rotated.
+        angle (float): The angle by which to rotate the image counterclockwise.
+        center_point (tuple, optional): The point around which to rotate the image. Defaults to the center of the image.
+        scale (float, optional): The scaling factor. Defaults to 1.0.
+        border_mode (int, optional): Pixel extrapolation method. Defaults to cv2.BORDER_REPLICATE.
+
+    Returns:
+        numpy.ndarray: The rotated image.
+    """
+    height, width = image.shape[:2]
+    if center_point is None:
+        center_point = (width // 2, height // 2)
+    rotation_matrix = cv2.getRotationMatrix2D(center_point, angle, scale)
+    rotated_image = cv2.warpAffine(image, rotation_matrix, (width, height), borderMode=border_mode)
+    return rotated_image
 
 
 def rotate_location(angle, rect):
-    """
-    rect: x,y,w,h
-    """
-    anglePi = -angle * np.pi / 180.0
-    cosA = np.cos(anglePi)
-    sinA = np.sin(anglePi)
+    """Rotates the coordinates of a rectangle by a given angle.
 
-    x = rect[0]
-    y = rect[1]
-    width = rect[2]
-    height = rect[3]
+    Args:
+        angle (float): The angle by which to rotate the rectangle, in degrees.
+        rect (tuple): A tuple (x, y, width, height) representing the rectangle.
+
+    Returns:
+        list: A list of tuples representing the new coordinates of the rectangle's corners.
+    """
+    angle_radians = -angle * np.pi / 180.0
+    cos_angle = np.cos(angle_radians)
+    sin_angle = np.sin(angle_radians)
+
+    x, y, width, height = rect
     x1 = x - 0.5 * width
     y1 = y - 0.5 * height
 
@@ -629,23 +898,23 @@ def rotate_location(angle, rect):
     x3 = x0
     y3 = y2
 
-    x0n = (x0 - x) * cosA - (y0 - y) * sinA + x
-    y0n = (x0 - x) * sinA + (y0 - y) * cosA + y
+    x0_new = (x0 - x) * cos_angle - (y0 - y) * sin_angle + x
+    y0_new = (x0 - x) * sin_angle + (y0 - y) * cos_angle + y
 
-    x1n = (x1 - x) * cosA - (y1 - y) * sinA + x
-    y1n = (x1 - x) * sinA + (y1 - y) * cosA + y
+    x1_new = (x1 - x) * cos_angle - (y1 - y) * sin_angle + x
+    y1_new = (x1 - x) * sin_angle + (y1 - y) * cos_angle + y
 
-    x2n = (x2 - x) * cosA - (y2 - y) * sinA + x
-    y2n = (x2 - x) * sinA + (y2 - y) * cosA + y
+    x2_new = (x2 - x) * cos_angle - (y2 - y) * sin_angle + x
+    y2_new = (x2 - x) * sin_angle + (y2 - y) * cos_angle + y
 
-    x3n = (x3 - x) * cosA - (y3 - y) * sinA + x
-    y3n = (x3 - x) * sinA + (y3 - y) * cosA + y
+    x3_new = (x3 - x) * cos_angle - (y3 - y) * sin_angle + x
+    y3_new = (x3 - x) * sin_angle + (y3 - y) * cos_angle + y
 
-    return [(x0n, y0n), (x1n, y1n), (x2n, y2n), (x3n, y3n)]
+    return [(x0_new, y0_new), (x1_new, y1_new), (x2_new, y2_new), (x3_new, y3_new)]
 
 
 def letterbox(
-        im,
+        image,
         new_shape=640,
         color=(114, 114, 114),
         auto=True,
@@ -653,254 +922,375 @@ def letterbox(
         scale_up=True,
         stride=32,
 ):
-    # Resize and pad image while meeting stride-multiple constraints
-    shape = im.shape[:2]  # current shape [height, width]
+    """Resizes and pads an image while meeting stride-multiple constraints.
+
+    Args:
+        image (numpy.ndarray): The input image to be resized and padded.
+        new_shape (int or tuple, optional): The target shape for the image. If an integer is provided, both width and height will be set to this value. Defaults to 640.
+        color (tuple, optional): The color value for padding. Defaults to (114, 114, 114).
+        auto (bool, optional): Whether to automatically adjust padding to the minimum rectangle. Defaults to True.
+        scale_fill (bool, optional): Whether to stretch the image to fill the new shape. Defaults to False.
+        scale_up (bool, optional): Whether to allow scaling up of the image. Defaults to True.
+        stride (int, optional): The stride value for padding. Defaults to 32.
+
+    Returns:
+        tuple: The resized and padded image, the scale ratio, and the padding values (dw, dh).
+    """
+    shape = image.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
         new_shape = (new_shape, new_shape)
 
     # Scale ratio (new / old)
-    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-    if not scale_up:  # only scale down, do not scale up (for better val mAP)
-        r = min(r, 1.0)
+    scale_ratio = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    if not scale_up:  # only scale down, do not scale up (for better validation mAP)
+        scale_ratio = min(scale_ratio, 1.0)
 
     # Compute padding
-    ratio = r, r  # width, height ratios
-    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
-    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+    ratio = scale_ratio, scale_ratio  # width, height ratios
+    new_unpadded = int(round(shape[1] * scale_ratio)), int(round(shape[0] * scale_ratio))
+    dw, dh = new_shape[1] - new_unpadded[0], new_shape[0] - new_unpadded[1]  # width, height padding
     if auto:  # minimum rectangle
-        dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
+        dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # width, height padding
     elif scale_fill:  # stretch
         dw, dh = 0.0, 0.0
-        new_unpad = (new_shape[1], new_shape[0])
+        new_unpadded = (new_shape[1], new_shape[0])
         ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
 
     dw /= 2  # divide padding into 2 sides
     dh /= 2
 
-    if shape[::-1] != new_unpad:  # resize
-        im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
+    if shape[::-1] != new_unpadded:  # resize
+        image = cv2.resize(image, new_unpadded, interpolation=cv2.INTER_LINEAR)
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    im = cv2.copyMakeBorder(
-        im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
+    image = cv2.copyMakeBorder(
+        image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
     )  # add border
-    return im, ratio, (dw, dh)
+    return image, ratio, (dw, dh)
 
 
 # =============图像debug=============
-def put_text(
-        im0,
-        text,
-        pts=None,
-        bg_color=None,
-        text_color=None,
-        tl=None,
-        zh_font_path="resource/Songti.ttc",
-):
-    text = str(text)
-    # ============config========
-    is_gray = im0.ndim == 2
-    if pts is None:
-        pts = (0, 0)
-    if bg_color is None:
-        bg_color = (0, 0, 0)
-    if text_color is None:
-        text_color = 255 if is_gray else (255, 255, 255)
-    height, width = im0.shape[:2]
-    if tl is None:  # base 30 for pillow equal 1 for opencv
-        tl = round(0.01 * np.sqrt(height ** 2 + width ** 2)) + 1
-    has_chinese_char = has_chinese(text)
+def has_chinese(text):
+    """Checks if a string contains any Chinese characters.
 
-    # ==========write===========
-    im0 = np.ascontiguousarray(im0)
-    if has_chinese_char:
-        img = put_text_use_pillow(im0, pts, text, tl, bg_color, text_color, zh_font_path)
-    else:
-        img = put_text_using_opencv(im0, pts, text, tl, bg_color, text_color)
-    return img
+    Args:
+        text (str): The input string to be checked.
 
-
-def has_chinese(string):
-    for ch in string:
-        if "\u4e00" <= ch <= "\u9fff":
+    Returns:
+        bool: True if the string contains Chinese characters, False otherwise.
+    """
+    for char in text:
+        if "\u4e00" <= char <= "\u9fff":
             return True
     return False
 
 
-def put_text_using_opencv(img, pts, text, tl, bg_color, text_color):
-    img = np.ascontiguousarray(img)
-    height, width = img.shape[:2]
+def put_text(
+        image,
+        text,
+        position=None,
+        background_color=None,
+        text_color=None,
+        text_size=None,
+        chinese_font_path="resource/Songti.ttc",
+):
+    """Adds text to an image at a specified position with optional background color.
+
+    Args:
+        image (numpy.ndarray): The input image to which text will be added.
+        text (str): The text to be added to the image.
+        position (tuple, optional): The (x, y) coordinates for the text position. Defaults to (0, 0).
+        background_color (tuple, optional): The background color for the text. Defaults to (0, 0, 0).
+        text_color (tuple or int, optional): The color of the text. Defaults to 255 for grayscale images and (255, 255, 255) for color images.
+        text_size (int, optional): The size of the text. Defaults to a value based on the image dimensions.
+        chinese_font_path (str, optional): The path to the Chinese font file. Defaults to "resource/Songti.ttc".
+
+    Returns:
+        numpy.ndarray: The image with the added text.
+    """
+    text = str(text)
+    is_gray = image.ndim == 2
+
+    if position is None:
+        position = (0, 0)
+    if background_color is None:
+        background_color = (0, 0, 0)
+    if text_color is None:
+        text_color = 255 if is_gray else (255, 255, 255)
+
+    height, width = image.shape[:2]
+    if text_size is None:  # base 30 for pillow equal 1 for opencv
+        text_size = round(0.01 * np.sqrt(height ** 2 + width ** 2)) + 1
+
+    has_chinese_char = has_chinese(text)
+
+    # Convert image to contiguous array
+    image = np.ascontiguousarray(image)
+    if has_chinese_char:
+        img_with_text = put_text_use_pillow(image, position, text, text_size, background_color, text_color,
+                                            chinese_font_path)
+    else:
+        img_with_text = put_text_using_opencv(image, position, text, text_size, background_color, text_color)
+
+    return img_with_text
+
+
+def put_text_using_opencv(image, position, text, text_size, background_color, text_color):
+    """Adds text to an image using OpenCV.
+
+    Args:
+        image (numpy.ndarray): The input image to which text will be added.
+        position (tuple): The (x, y) coordinates for the text position.
+        text (str): The text to be added to the image.
+        text_size (int): The size of the text.
+        background_color (tuple or int): The background color for the text.
+        text_color (tuple or int): The color of the text.
+
+    Returns:
+        numpy.ndarray: The image with the added text.
+    """
+    image = np.ascontiguousarray(image)
+    height, width = image.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = tl / 30
+    font_scale = text_size / 30
     thickness = 1
-    # ==========offset position=======
-    x1, y1 = np.array(pts, dtype=int)
+
+    # Offset position
+    x1, y1 = np.array(position, dtype=int)
     x2, y2 = x1, y1
     font_sizes = []
     texts = text.replace('\r', '\n').split('\n')
     cur_texts = []
-    (c_w, c_h), baseline = cv2.getTextSize('1234567890gj', font, font_scale, thickness)
-    c_h = int(c_h + baseline)
-    c_w = int(c_w / 12)
-    for text in texts:
-        cur_text = [text]
+    (char_width, char_height), baseline = cv2.getTextSize('1234567890gj', font, font_scale, thickness)
+    char_height = int(char_height + baseline)
+    char_width = int(char_width / 12)
+
+    for line in texts:
+        cur_text = [line]
         while cur_text:
-            text = cur_text.pop()
-            if len(text) == 0:
+            line = cur_text.pop()
+            if len(line) == 0:
                 continue
-            t_w, t_h = c_w * len(text), c_h
-            if t_w > width and len(text) > 1:
-                # 获取一个字符的
-                mid = max(int(width / c_w), 1)
-                cur_text.append(text[mid:])
-                cur_text.append(text[:mid])
+            text_width, text_height = char_width * len(line), char_height
+            if text_width > width and len(line) > 1:
+                mid = max(int(width / char_width), 1)
+                cur_text.append(line[mid:])
+                cur_text.append(line[:mid])
             else:
-                x2 = max(x2, x1 + t_w)
-                y2 += t_h + 2
-                font_sizes.append([t_w, t_h])
-                cur_texts.append(text)
+                x2 = max(x2, x1 + text_width)
+                y2 += text_height + 2
+                font_sizes.append([text_width, text_height])
+                cur_texts.append(line)
 
     x1, _ = get_offset_coordinates(x1, x2, 0, width)
     y1, _ = get_offset_coordinates(y1, y2, 0, height)
 
-    for text, (tw, th) in zip(cur_texts, font_sizes):
+    for line, (tw, th) in zip(cur_texts, font_sizes):
         left_x, right_x = x1, x1 + tw
         top_y, bottom_y = y1, y1 + th
-        if bg_color != -1:
+        if background_color != -1:
             try:
                 cv2.rectangle(
-                    img, (left_x - 1, top_y),
+                    image, (left_x - 1, top_y),
                     (right_x + 1, bottom_y),
-                    bg_color, -1, cv2.LINE_AA
+                    background_color, -1, cv2.LINE_AA
                 )
-            except:
-                print("[put_text_using_opencv]: ", (left_x - 1, top_y), (right_x + 1, bottom_y))
+            except Exception as e:
+                print(f"[put_text_using_opencv]: {e}, coordinates: {(left_x - 1, top_y), (right_x + 1, bottom_y)}")
         cv2.putText(
-            img, text, (left_x, bottom_y - baseline),
+            image, line, (left_x, bottom_y - baseline),
             font, font_scale, text_color, thickness
         )
         x1, y1 = left_x, bottom_y + 1
-    return img
+
+    return image
 
 
-def put_text_use_pillow(img, pts, text, tl, bg_color, text_color, zh_font_path):
-    tl = max(tl, 10)
-    if osp.exists(zh_font_path):
-        font = ImageFont.truetype(zh_font_path, int(tl))
+def put_text_use_pillow(image, position, text, text_size, background_color, text_color, chinese_font_path):
+    """Adds text to an image using Pillow, with support for Chinese characters.
+
+    Args:
+        image (numpy.ndarray): The input image to which text will be added.
+        position (tuple): The (x, y) coordinates for the text position.
+        text (str): The text to be added to the image.
+        text_size (int): The size of the text.
+        background_color (tuple or int): The background color for the text.
+        text_color (tuple or int): The color of the text.
+        chinese_font_path (str): The path to the Chinese font file.
+
+    Returns:
+        numpy.ndarray: The image with the added text.
+    """
+    text_size = max(text_size, 10)
+    if osp.exists(chinese_font_path):
+        font = ImageFont.truetype(chinese_font_path, int(text_size))
     else:
-        zh_font_path = fm.findfont(fm.FontProperties(family="AR PL UKai CN"))
-        if osp.exists(zh_font_path):
-            font = ImageFont.truetype(zh_font_path, int(tl))
+        chinese_font_path = fm.findfont(fm.FontProperties(family="AR PL UKai CN"))
+        if osp.exists(chinese_font_path):
+            font = ImageFont.truetype(chinese_font_path, int(text_size))
         else:
             print("[put_text_use_pillow]: 有中文, 但没有对应的字体.")
             font = None
-    if font is None:
-        return put_text_using_opencv(img, pts, text, tl, bg_color, text_color)
 
-    height, width = img.shape[:2]
-    is_gray = img.ndim == 2
-    # ==========offset position=======
-    x1, y1 = np.array(pts, dtype=int)
+    if font is None:
+        return put_text_using_opencv(image, position, text, text_size, background_color, text_color)
+
+    height, width = image.shape[:2]
+    is_gray = image.ndim == 2
+
+    # Offset position
+    x1, y1 = np.array(position, dtype=int)
     x2, y2 = x1, y1
     font_sizes = []
     texts = text.replace('\r', '\n').split('\n')
     cur_texts = []
-    for text in texts:
-        cur_text = [text]
+
+    for line in texts:
+        cur_text = [line]
         while cur_text:
-            text = cur_text.pop()
-            if len(text) == 0:
+            line = cur_text.pop()
+            if len(line) == 0:
                 continue
             if pl_version < '9.5.0':  # 9.5.0 later
-                left, top, right, bottom = font.getbbox(text)
-                tw, th = right - left, bottom - top
+                left, top, right, bottom = font.getbbox(line)
+                text_width, text_height = right - left, bottom - top
             else:
-                tw, th = font.getsize(text)
-            if tw > width and len(text) > 1:
-                mid = max(int(width / (tw / len(text))), 1)
-                cur_text.append(text[mid:])
-                cur_text.append(text[:mid])
+                text_width, text_height = font.getsize(line)
+            if text_width > width and len(line) > 1:
+                mid = max(int(width / (text_width / len(line))), 1)
+                cur_text.append(line[mid:])
+                cur_text.append(line[:mid])
             else:
-                x2 = max(x2, x1 + tw)
-                y2 += th + 2
-                font_sizes.append([tw, th])
-                cur_texts.append(text)
+                x2 = max(x2, x1 + text_width)
+                y2 += text_height + 2
+                font_sizes.append([text_width, text_height])
+                cur_texts.append(line)
+
     x1, _ = get_offset_coordinates(x1, x2, 0, width)
     y1, _ = get_offset_coordinates(y1, y2, 0, height)
+
     if is_gray:
-        img_pillow = Image.fromarray(img)
+        img_pillow = Image.fromarray(image)
     else:
-        img_pillow = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        img_pillow = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
     draw = ImageDraw.Draw(img_pillow)
-    for text, (tw, th) in zip(cur_texts, font_sizes):
+
+    for line, (tw, th) in zip(cur_texts, font_sizes):
         left_top_x, left_top_y = x1, y1
         right_bottom_x, right_bottom_y = x1 + tw, y1 + th
-        if bg_color != -1:
+        if background_color != -1:
             cv2.rectangle(
-                img, (left_top_x, left_top_y - 1),
+                image, (left_top_x, left_top_y - 1),
                 (right_bottom_x, right_bottom_y + 1),
-                bg_color, -1, cv2.LINE_AA
+                background_color, -1, cv2.LINE_AA
             )
-        draw.text((left_top_x, left_top_y), text, font=font, fill=text_color)
+        draw.text((left_top_x, left_top_y), line, font=font, fill=text_color)
         x1, y1 = left_top_x, right_bottom_y + 1
-    img = np.asarray(img_pillow)
+
+    image = np.asarray(img_pillow)
     if not is_gray:
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    return img
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    return image
 
 
-def norm_for_show(x):
-    return ((x - np.min(x)) / (np.max(x) - np.min(x)) * 255).astype(np.uint8)
+def norm_for_show(array):
+    """Normalizes an array for display purposes.
 
+    Args:
+        array (numpy.ndarray): The input array to be normalized.
 
-def imshow(name, img, ori=False, t=0, cmp=113):
+    Returns:
+        numpy.ndarray: The normalized array, scaled to the range [0, 255] and converted to uint8.
     """
-    name: window name
-    img: ndarray
-    t: time step
-    cmp: 113 is 'q', 27 is 'esc'
+    normalized_array = ((array - np.min(array)) / (np.max(array) - np.min(array)) * 255).astype(np.uint8)
+    return normalized_array
+
+
+def imshow(window_name, image, original_size=False, delay=0, exit_key=113):
+    """Displays an image in a window.
+
+    Args:
+        window_name (str): The name of the window.
+        image (numpy.ndarray): The image to be displayed.
+        original_size (bool, optional): Whether to display the image in its original size. Defaults to False.
+        delay (int, optional): The delay in milliseconds for the waitKey function. Defaults to 0.
+        exit_key (int, optional): The key code to exit the display. Defaults to 113 ('q').
+
+    Returns:
+        int: The key code pressed during the display.
     """
-    if img is not None:
-        if not ori:
-            height, width = img.shape[:2]
+    if image is not None:
+        if not original_size:
+            height, width = image.shape[:2]
             if height > 2048 or width > 2048:
-                img = size_pre_process(img, long=2048)
-        cv2.imshow(name, img)
-    key = cv2.waitKey(t)
-    if key == cmp:
+                image = size_pre_process(image, long=2048)
+        cv2.imshow(window_name, image)
+    key = cv2.waitKey(delay)
+    if key == exit_key:
         exit()
     return key
 
 
-def imwrite(path, img, overwrite=True):
-    if not overwrite and osp.exists(path):
-        print(f"{path} is existed!")
+def imwrite(file_path, image, overwrite=True):
+    """Writes an image to a file.
+
+    Args:
+        file_path (str): The path to save the image.
+        image (numpy.ndarray): The image to be saved.
+        overwrite (bool, optional): Whether to overwrite the file if it exists. Defaults to True.
+    """
+    if not overwrite and osp.exists(file_path):
+        print(f"{file_path} already exists!")
         return
-    os.makedirs(osp.dirname(path), exist_ok=True)
-    cv2.imwrite(path, img)
+    os.makedirs(osp.dirname(file_path), exist_ok=True)
+    cv2.imwrite(file_path, image)
 
 
 # ============标签处处理==============
 
 
 def create_labelme_file(png_path, content=None, overwrite=False, labelme_version="5.0.1"):
+    """Creates a LabelMe JSON file for the given PNG image.
+
+    Args:
+        png_path (str): Path to the PNG image file.
+        content (dict, optional): Content to be written to the JSON file. Defaults to None.
+        overwrite (bool, optional): Whether to overwrite the existing JSON file. Defaults to False.
+        labelme_version (str, optional): Version of LabelMe. Defaults to "5.0.1".
+    """
     json_path = osp.splitext(png_path)[0] + '.json'
     if osp.exists(json_path) and not overwrite:
         return
 
-    # Create the base_info dictionary
+    # Create the content dictionary if not provided
     if content is None:
         content = create_labelme_content(
             None, png_path, [], labelme_version
         )
 
-    # Write the base_info dictionary to a json file
-    with open(json_path, 'w') as fo:
-        json.dump(content, fo)
+    # Write the content dictionary to a JSON file
+    with open(json_path, 'w') as file_object:
+        json.dump(content, file_object)
 
 
-def create_labelme_content(img, png_path, shapes=[], labelme_version="5.0.1"):
-    # # Convert the image to base64
+def create_labelme_content(img, png_path, shapes=None, labelme_version="5.0.1"):
+    """Creates the content dictionary for a LabelMe JSON file.
+
+    Args:
+        img (numpy.ndarray or None): Image data. If None, the image will be read from png_path.
+        png_path (str): Path to the PNG image file.
+        shapes (list, optional): List of shapes to be included in the JSON file. Defaults to an empty list.
+        labelme_version (str, optional): Version of LabelMe. Defaults to "5.0.1".
+
+    Returns:
+        dict: Content dictionary for the LabelMe JSON file.
+    """
+    if shapes is None:
+        shapes = []
+
+    # Convert the image to base64
     if img is None:
         img = cv2.imread(png_path)
     encoded_string = cv_img_to_base64(img)
@@ -919,61 +1309,107 @@ def create_labelme_content(img, png_path, shapes=[], labelme_version="5.0.1"):
     return base_info
 
 
-def create_labelme_shape(label: str, pts, stype: str):
-    pts = np.reshape(pts, [-1, 2]).squeeze().tolist()
+def create_labelme_shape(label: str, points, shape_type: str):
+    """Creates a shape dictionary for a LabelMe JSON file.
+
+    Args:
+        label (str): Label for the shape.
+        points (list): List of points defining the shape.
+        shape_type (str): Type of the shape (e.g., "rectangle", "polygon").
+
+    Returns:
+        dict: Shape dictionary for the LabelMe JSON file.
+    """
+    points = np.reshape(points, [-1, 2]).squeeze().tolist()
     return {
         "label": label,
-        "points": pts,
+        "points": points,
         "group_id": None,
-        "shape_type": stype,
+        "shape_type": shape_type,
         "flags": {}
     }
 
 
-def compute_polygon_from_mask(mask):
-    """给一张mask图，输出其轮廓点，mask图必须是0-1"""
-    import skimage
+POLYGON_APPROX_TOLERANCE = 0.004
 
-    contours = skimage.measure.find_contours(np.pad(mask, pad_width=1))
+
+def compute_polygon_from_mask(mask, debug=False):
+    """Extracts polygon contours from a binary mask image.
+
+    Args:
+        mask (numpy.ndarray): Binary mask image with values 0 or 1.
+        debug (bool, optional): Whether to visualization. Defaults to False.
+
+    Returns:
+        list: List of polygons, where each polygon is represented as an array of points.
+    """
+    import skimage.measure
+    # Pad the mask to ensure contours are detected at the edges
+    padded_mask = np.pad(mask, pad_width=1)
+    contours = skimage.measure.find_contours(padded_mask, level=0.5)
+
     if len(contours) == 0:
-        print("No contour found, so returning empty polygon.")
+        print("No contour found, returning empty polygon.")
         return []
 
-    POLYGON_APPROX_TOLERANCE = 0.004
-    ans = []
+    polygons = []
+
     for contour in contours:
         if contour.shape[0] < 3:
             continue
+        # Approximate the polygon
         polygon = skimage.measure.approximate_polygon(
             coords=contour,
             tolerance=np.ptp(contour, axis=0).max() * POLYGON_APPROX_TOLERANCE,
         )
+        # Clip the polygon to the mask dimensions
         polygon = np.clip(polygon, (0, 0), (mask.shape[0] - 1, mask.shape[1] - 1))
-        polygon = polygon[:-1]  # drop last point that is duplicate of first point
-        if 0:
+        # Remove the last point if it is a duplicate of the first point
+        polygon = polygon[:-1]
+
+        # Optional visualization (disabled by default)
+        if debug:
             vision = (255 * np.stack([mask] * 3, axis=-1)).astype(np.uint8)
             for y, x in polygon.astype(int):
                 cv2.circle(vision, (x, y), 3, (0, 0, 222), -1)
-            imshow("p", vision)
-        ans.append(polygon[:, ::-1])  # yx -> xy
-    return ans
+            cv2.imshow("Polygon", vision)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+        # Append the polygon with coordinates in (x, y) format
+        polygons.append(polygon[:, ::-1])
+
+    return polygons
 
 
 class LabelObject(object):
-    type = None
-    pts = None
-    ori_pts = None
-    pts_normed = None
-    label = None
-    box = None
-    height = None
-    width = None
+    """Class representing a labeled object with various attributes."""
+
+    def __init__(self):
+        self.type = None
+        self.pts = None
+        self.ori_pts = None
+        self.pts_normed = None
+        self.label = None
+        self.box = None
+        self.height = None
+        self.width = None
 
     def __str__(self):
         return f"type: {self.type}, label: {self.label}"
 
 
 def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
+    """Parses a JSON file and extracts image and shape information.
+
+    Args:
+        path (str): Path to the JSON file.
+        polygon (bool): Whether to convert points to polygon format.
+        return_dict (bool, optional): Whether to return a dictionary of objects. Defaults to False.
+
+    Returns:
+        tuple: A tuple containing a list or dictionary of LabelObject instances, the image, and the basename.
+    """
     assert path.endswith('.json')
     info = json.load(open(path, "r"))
     base64_str = info.get("imageData", None)
@@ -981,7 +1417,7 @@ def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
         img = cv2.imread(path.replace(".json", ".png"))
     else:
         img_str = base64.b64decode(base64_str)
-        np_arr = np.fromstring(img_str, np.uint8)
+        np_arr = np.frombuffer(img_str, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
     if img is None:
@@ -1019,13 +1455,24 @@ def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
     return obj_list, img, basename
 
 
-def show_yolo_label2(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
+def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
+    """Displays YOLO labels on an image.
+
+    Args:
+        img (numpy.ndarray): The image on which to display the labels.
+        lines (list): List of label lines, each containing class index and bounding box coordinates.
+        xywh (bool, optional): Whether the bounding box coordinates are in (x, y, width, height) format. Defaults to True.
+        classes (dict, optional): Dictionary mapping class indices to class names. Defaults to None.
+        colors (list, optional): List of colors for each class. Defaults to None.
+        thickness (int, optional): Thickness of the bounding box lines. Defaults to 2.
+
+    Returns:
+        tuple: The image with labels and a list of points.
+    """
     if classes is None:
-        classes = {}
-        for i in range(10):
-            classes[i] = i
+        classes = {i: i for i in range(10)}
     if colors is None:
-        colors = make_color_table(len(classes))
+        colors = create_color_list(len(classes))
     mask = np.zeros_like(img)
     height, width = img.shape[:2]
     pts = []
@@ -1033,6 +1480,7 @@ def show_yolo_label2(img, lines, xywh=True, classes: dict = None, colors=None, t
         if not line: continue
         sp = line.strip().split(" ")
         idx, a, b, c, d = [float(x) for x in sp]
+        idx = int(idx)
         if xywh:
             x1, y1, x2, y2 = (
                     xywh2xyxy([a, b, c, d]) * np.array([width, height, width, height])
@@ -1046,69 +1494,49 @@ def show_yolo_label2(img, lines, xywh=True, classes: dict = None, colors=None, t
             mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)
         else:
             img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
-        img = put_text(img, classes[idx], (x1, y1), (0, 0, 0), (222, 222, 222))
+        img = put_text(img, str(classes[idx]), (x1, y1), (0, 0, 0), (222, 222, 222))
         pts.append([idx, x1, y1, x2, y2])
     if thickness == -1:
         img = cv2.addWeighted(img, 0.7, mask, 0.3, 1)
     return img, pts
 
 
-def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
-    if classes is None:
-        classes = {}
-        for i in range(10):
-            classes[i] = i
-    if colors is None:
-        colors = make_color_table(len(classes))
-    mask = np.zeros_like(img)
-    height, width = img.shape[:2]
-    for line in lines:
-        if not line: continue
-        sp = line.strip().split(" ")
-        idx, a, b, c, d = [float(x) for x in sp]
-        if xywh:
-            x1, y1, x2, y2 = (
-                    xywh2xyxy([a, b, c, d]) * np.array([width, height, width, height])
-            ).astype(int)
-        else:
-            x1, y1, x2, y2 = (
-                    np.array([a, b, c, d]) * np.array([width, height, width, height])
-            ).astype(int)
+def show_yolo_file(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
+    """Displays YOLO labels on an image from a file.
 
-        if thickness == -1:
-            mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)
-        else:
-            img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
-        img = put_text(img, classes[idx], (x1, y1), (0, 0, 0), (222, 222, 222))
-    if thickness == -1:
-        img = cv2.addWeighted(img, 0.7, mask, 0.3, 1)
-    return img
+    Args:
+        jpg_path (str): Path to the JPEG image file.
+        xywh (bool, optional): Whether the bounding box coordinates are in (x, y, width, height) format. Defaults to True.
+        classes (dict, optional): Dictionary mapping class indices to class names. Defaults to None.
+        colors (list, optional): List of colors for each class. Defaults to None.
+        thickness (int, optional): Thickness of the bounding box lines. Defaults to 2.
 
-
-def show_yolo_file2(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
+    Returns:
+        tuple: The image with labels and a list of points.
+    """
     img = cv2.imread(jpg_path)
     txt = osp.splitext(jpg_path)[0] + ".txt"
     with open(txt, "r") as fo:
         lines = fo.readlines()
-    img, pts = show_yolo_label2(img, lines, xywh, classes, colors, thickness)
+    img, pts = show_yolo_label(img, lines, xywh, classes, colors, thickness)
     img = put_text(img, osp.basename(jpg_path))
     return img, pts
 
 
-def show_yolo_file(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
-    img = cv2.imread(jpg_path)
-    txt = osp.splitext(jpg_path)[0] + ".txt"
-    with open(txt, "r") as fo:
-        lines = fo.readlines()
-    img, pts = show_yolo_label2(img, lines, xywh, classes, colors, thickness)
-    img = put_text(img, osp.basename(jpg_path))
-    return img
-
-
 # =========Warp face from insightface=======
-def estimate_norm(lmk, image_size=112):
-    from skimage import transform as trans
 
+
+def estimate_norm(landmarks, image_size=112):
+    """Estimates the normalization transformation matrix for given landmarks.
+
+    Args:
+        landmarks (numpy.ndarray): Array of shape (5, 2) containing the facial landmarks.
+        image_size (int, optional): Size of the output image. Defaults to 112.
+
+    Returns:
+        numpy.ndarray: The 2x3 transformation matrix.
+    """
+    from skimage import transform as trans
     arcface_dst = np.array(
         [
             [38.2946, 51.6963],
@@ -1119,167 +1547,214 @@ def estimate_norm(lmk, image_size=112):
         ],
         dtype=np.float32,
     )
-    assert lmk.shape == (5, 2)
-    assert image_size % 112 == 0 or image_size % 128 == 0
+
+    assert landmarks.shape == (5, 2), "Landmarks should be of shape (5, 2)."
+    assert image_size % 112 == 0 or image_size % 128 == 0, "Image size should be a multiple of 112 or 128."
+
     if image_size % 112 == 0:
         ratio = float(image_size) / 112.0
         diff_x = 0
     else:
         ratio = float(image_size) / 128.0
         diff_x = 8.0 * ratio
+
     dst = arcface_dst * ratio
     dst[:, 0] += diff_x
+
     tform = trans.SimilarityTransform()
-    tform.estimate(lmk, dst)  # [3,3]
-    M = tform.params[0:2, :]  # 前两行
-    return M
+    tform.estimate(landmarks, dst)
+    transformation_matrix = tform.params[0:2, :]
+
+    return transformation_matrix
 
 
-def norm_crop(img, landmark, image_size=112):
-    M = estimate_norm(landmark, image_size)
-    warped = cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)
-    return warped, M
+def norm_crop(img, landmarks, image_size=112):
+    """Normalizes and crops an image based on facial landmarks.
+
+    Args:
+        img (numpy.ndarray): The input image.
+        landmarks (numpy.ndarray): Array of shape (5, 2) containing the facial landmarks.
+        image_size (int, optional): Size of the output image. Defaults to 112.
+
+    Returns:
+        tuple: The warped image and the transformation matrix.
+    """
+    transformation_matrix = estimate_norm(landmarks, image_size)
+    warped_image = cv2.warpAffine(img, transformation_matrix, (image_size, image_size), borderValue=0.0)
+
+    return warped_image, transformation_matrix
 
 
 def warp_face(img, x1, y1, x2, y2):
-    cx, cy, fw, fh = xyxy2xywh([x1, y1, x2, y2]).flatten().astype(int)
-    _scale = 256 / (max(fw, fh) * 1.5)
-    return transform(img, (cx, cy), 256, _scale, 0)
+    """Warps a face in an image based on bounding box coordinates.
+
+    Args:
+        img (numpy.ndarray): The input image.
+        x1 (int): The x-coordinate of the top-left corner of the bounding box.
+        y1 (int): The y-coordinate of the top-left corner of the bounding box.
+        x2 (int): The x-coordinate of the bottom-right corner of the bounding box.
+        y2 (int): The y-coordinate of the bottom-right corner of the bounding box.
+
+    Returns:
+        numpy.ndarray: The warped image.
+    """
+    center_x, center_y, face_width, face_height = xyxy2xywh([x1, y1, x2, y2]).flatten().astype(int)
+    scale = 256 / (max(face_width, face_height) * 1.5)
+    return transform(img, (center_x, center_y), 256, scale, 0)
 
 
 def transform(data, center, output_size, scale, rotation):
+    """Applies a series of transformations to the input data.
+
+    Args:
+        data (numpy.ndarray): The input image data.
+        center (tuple): The center point for the transformation.
+        output_size (int): The size of the output image.
+        scale (float): The scaling factor.
+        rotation (float): The rotation angle in degrees.
+
+    Returns:
+        tuple: The transformed image and the transformation matrix.
+    """
     from skimage import transform as trans
-
     scale_ratio = scale
-    rot = float(rotation) * np.pi / 180.0
-    # translation = (output_size/2-center[0]*scale_ratio, output_size/2-center[1]*scale_ratio)
-    t1 = trans.SimilarityTransform(scale=scale_ratio)
-    cx = center[0] * scale_ratio
-    cy = center[1] * scale_ratio
-    t2 = trans.SimilarityTransform(translation=(-1 * cx, -1 * cy))
-    t3 = trans.SimilarityTransform(rotation=rot)
-    t4 = trans.SimilarityTransform(translation=(output_size / 2, output_size / 2))
-    t = t1 + t2 + t3 + t4
-    M = t.params[0:2]
-    cropped = cv2.warpAffine(data, M, (output_size, output_size), borderValue=0.0)
-    return cropped, M
+    rotation_radians = float(rotation) * np.pi / 180.0
+
+    # Define the series of transformations
+    scale_transform = trans.SimilarityTransform(scale=scale_ratio)
+    translation_transform1 = trans.SimilarityTransform(translation=(-center[0] * scale_ratio, -center[1] * scale_ratio))
+    rotation_transform = trans.SimilarityTransform(rotation=rotation_radians)
+    translation_transform2 = trans.SimilarityTransform(translation=(output_size / 2, output_size / 2))
+
+    # Combine the transformations
+    combined_transform = scale_transform + translation_transform1 + rotation_transform + translation_transform2
+    transformation_matrix = combined_transform.params[0:2]
+
+    # Apply the transformation
+    cropped_image = cv2.warpAffine(data, transformation_matrix, (output_size, output_size), borderValue=0.0)
+
+    return cropped_image, transformation_matrix
 
 
-def center_crop_rectangle(img, x1, y1, x2, y2, ratio=1.0):
-    height, width = img.shape[:2]
-    cx, cy, fw, fh = xyxy2xywh([x1, y1, x2, y2]).flatten().astype(int)
-    hfs = max(fw, fh) // 2 * ratio
-    bx, by, ex, ey = cx - hfs, cy - hfs, cx + hfs, cy + hfs
-    bx, ex = get_offset_coordinates(bx, ex, 0, width)
-    by, ey = get_offset_coordinates(by, ey, 0, height)
-    bx, by, ex, ey = [int(x) for x in [bx, by, ex, ey]]
-    return img[by:ey, bx:ex, :], bx, by
+def transform_points_2d(points, transformation_matrix):
+    """Transforms 2D points using a given transformation matrix.
+
+    Args:
+        points (numpy.ndarray): Array of shape (N, 2) containing the 2D points.
+        transformation_matrix (numpy.ndarray): The 2x3 transformation matrix.
+
+    Returns:
+        numpy.ndarray: Array of transformed 2D points.
+    """
+    transformed_points = np.zeros(shape=points.shape, dtype=np.float32)
+    for i in range(points.shape[0]):
+        point = points[i]
+        homogeneous_point = np.array([point[0], point[1], 1.0], dtype=np.float32)
+        transformed_point = np.dot(transformation_matrix, homogeneous_point)
+        transformed_points[i] = transformed_point[0:2]
+
+    return transformed_points
 
 
-def trans_points2d(pts, M):
-    new_pts = np.zeros(shape=pts.shape, dtype=np.float32)
-    for i in range(pts.shape[0]):
-        pt = pts[i]
-        new_pt = np.array([pt[0], pt[1], 1.0], dtype=np.float32)
-        new_pt = np.dot(M, new_pt)
-        new_pts[i] = new_pt[0:2]
+def transform_points_3d(points, transformation_matrix):
+    """Transforms 3D points using a given transformation matrix.
 
-    return new_pts
+    Args:
+        points (numpy.ndarray): Array of shape (N, 3) containing the 3D points.
+        transformation_matrix (numpy.ndarray): The 2x3 transformation matrix.
 
+    Returns:
+        numpy.ndarray: Array of transformed 3D points.
+    """
+    scale = np.sqrt(transformation_matrix[0][0] ** 2 + transformation_matrix[0][1] ** 2)
+    transformed_points = np.zeros(shape=points.shape, dtype=np.float32)
+    for i in range(points.shape[0]):
+        point = points[i]
+        homogeneous_point = np.array([point[0], point[1], 1.0], dtype=np.float32)
+        transformed_point = np.dot(transformation_matrix, homogeneous_point)
+        transformed_points[i][0:2] = transformed_point[0:2]
+        transformed_points[i][2] = points[i][2] * scale
 
-def trans_points3d(pts, M):
-    scale = np.sqrt(M[0][0] * M[0][0] + M[0][1] * M[0][1])
-    new_pts = np.zeros(shape=pts.shape, dtype=np.float32)
-    for i in range(pts.shape[0]):
-        pt = pts[i]
-        new_pt = np.array([pt[0], pt[1], 1.0], dtype=np.float32)
-        new_pt = np.dot(M, new_pt)
-        new_pts[i][0:2] = new_pt[0:2]
-        new_pts[i][2] = pts[i][2] * scale
-
-    return new_pts
-
-
-def trans_points(pts, M):
-    if pts.shape[1] == 2:
-        return trans_points2d(pts, M)
-    else:
-        return trans_points3d(pts, M)
+    return transformed_points
 
 
 # =======3D==========
-def pixel2d2camera3d2(pt_2d, z, mtx, dist):
+def pixel_to_camera_3d(pt_2d, depth, camera_matrix):
+    """Converts 2D pixel coordinates to 3D camera coordinates.
+
+    Args:
+        pt_2d (tuple): The (u, v) coordinates in the distorted image.
+        depth (float or numpy.ndarray): The depth value or depth map.
+        camera_matrix (numpy.ndarray): The camera intrinsic matrix.
+
+    Returns:
+        tuple: The 3D camera coordinates and the depth value.
     """
-    pt_2d ： 畸变图像上的uv坐标
-    """
-    if np.ndim(z) > 1:
-        x, y = map(lambda x: int(x), pt_2d)
-        z = z[y, x]
-    if z == 0:
+    if np.ndim(depth) > 1:
+        x, y = map(int, pt_2d)
+        depth = depth[y, x]
+
+    if depth == 0:
         return None, None
+
     u_distorted, v_distorted = pt_2d
-    homo_uv1 = np.array([u_distorted, v_distorted, 1])
-    pc_xy1 = np.linalg.inv(mtx) @ homo_uv1  # p camera
-    pc_xyz = pc_xy1 * z
-    return pc_xyz, z
+    homogeneous_uv1 = np.array([u_distorted, v_distorted, 1])
+    camera_xy1 = np.linalg.inv(camera_matrix) @ homogeneous_uv1
+    camera_xyz = camera_xy1 * depth
+
+    return camera_xyz, depth
 
 
-def warp_pts_with_homo(x, y, mtx):
-    homo = np.array([x, y, 1]).T
-    home = mtx @ homo
-    home /= home[2]
-    return home
+def pixel_to_camera_3d_numpy(p_uv, depth, camera_matrix):
+    """Converts 2D pixel coordinates to 3D camera coordinates using NumPy.
 
+    Args:
+        p_uv (numpy.ndarray): Array of shape (N, 2) containing the 2D pixel coordinates.
+        depth (numpy.ndarray or float): Array of shape (N,) containing the depth values or a single depth value.
+        camera_matrix (numpy.ndarray): The 3x3 camera intrinsic matrix.
 
-def pixel2d2camera3d_numpy(p_uv, z, mtx):
+    Returns:
+        tuple: The 3D camera coordinates (N, 3) and the depth values (N,).
     """
+    if np.ndim(depth) == 2:
+        indices = np.reshape(p_uv, (-1, 2)).astype(int)
+        depth = depth[indices[:, 1], indices[:, 0]]
 
-    :param p_uv:, Nx2
-    :param z: N,
-    :param mtx: 3x3
-    :return: pc_xyz: (N, 3)
-    """
-    if np.ndim(z) == 2:
-        idxs = np.reshape(p_uv, (-1, 2)).astype(int)
-        z = z[idxs[:, 1], idxs[:, 0]]
-    u_distorted, v_distorted = np.split(p_uv, 2, -1)
+    u_distorted, v_distorted = np.split(p_uv, 2, axis=-1)
+    homogeneous_uv1 = np.stack([u_distorted, v_distorted, np.ones_like(u_distorted)], axis=1)  # [N, 3, 1]
+    camera_xy1 = np.matmul(np.linalg.inv(camera_matrix), homogeneous_uv1)[..., 0]  # [N, 3, 1]
+    camera_xyz = camera_xy1 * depth[:, None]  # depth shape: (N,)
 
-    homo_uv1 = np.stack(
-        [u_distorted, v_distorted, np.ones_like(u_distorted)], axis=1
-    )  # [N, 3, 1]
-    pc_xy1 = np.matmul(np.linalg.inv(mtx), homo_uv1)[..., 0]  # [N, 3, 1]
-    pc_xyz = pc_xy1 * z[:, None]  # z shape : (N, )
-    return pc_xyz, z
+    return camera_xyz, depth
 
 
-def write_img_and_txt(split_name, img, text):
-    if split_name[-4] == '.':
-        split_name = split_name[:-4]
-    if img is not None:
-        os.makedirs(osp.dirname(split_name), exist_ok=True)
-        imwrite(split_name + ".png", img)
-    if text is not None:
-        os.makedirs(osp.dirname(split_name), exist_ok=True)
-        with open(split_name + ".txt", "w") as fo:
-            fo.write(text)
+def draw_gaze(image, start, pitch_yaw, length, thickness=1, color=(0, 0, 255), is_degree=False):
+    """Draws the gaze angle on the given image based on eye positions.
 
+    Args:
+        image (numpy.ndarray): The input image.
+        start (tuple): The starting (x, y) coordinates for the gaze line.
+        pitch_yaw (tuple): The pitch and yaw angles.
+        length (int): The length of the gaze line.
+        thickness (int, optional): The thickness of the gaze line. Defaults to 1.
+        color (tuple, optional): The color of the gaze line in BGR format. Defaults to (0, 0, 255).
+        is_degree (bool, optional): Whether the pitch and yaw are in degrees. Defaults to False.
 
-def draw_gaze_with_k(
-        image, start, pitchyaw, length, thickness=1, color=(0, 0, 255), is_degree=False
-):
-    """Draw gaze angle on given image with a given eye positions.
-
-    pitchyaw: x朝右, y朝上
-    pixel: x朝右, y朝下
+    Returns:
+        tuple: The image with the gaze line drawn and the angle in degrees.
     """
     if is_degree:
-        pitchyaw = np.deg2rad(pitchyaw)
-    pitch, yaw = pitchyaw
+        pitch_yaw = np.deg2rad(pitch_yaw)
+
+    pitch, yaw = pitch_yaw
     x, y = start
+
     if np.ndim(image) == 2:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
     dx = length * np.cos(pitch) * np.sin(yaw)
     dy = -length * np.sin(pitch)
+
     cv2.arrowedLine(
         image,
         (int(x), int(y)),
@@ -1289,289 +1764,217 @@ def draw_gaze_with_k(
         cv2.LINE_AA,
         tipLength=0.2,
     )
-    k = np.rad2deg(np.arctan2(dy, dx))
-    return image, k
+
+    angle = np.rad2deg(np.arctan2(dy, dx))
+
+    return image, angle
 
 
-def draw_gaze(
-        image, start, pitchyaw, length, thickness=1, color=(0, 0, 255), is_degree=False
-):
-    image, _ = draw_gaze_with_k(
-        image, start, pitchyaw, length, thickness, color, is_degree
-    )
-    return image
+def gaze_3d_to_2d(gaze_3d, transformation_matrix=None):
+    """Converts 3D gaze vector to 2D pitch and yaw angles.
 
+    Args:
+        gaze_3d (numpy.ndarray): The 3D gaze vector.
+        transformation_matrix (numpy.ndarray, optional): The transformation matrix. Defaults to None.
 
-def gaze3dTo2d(gaze3d, M=None):
-    if M is not None:
-        gaze3d = np.dot(M, gaze3d)
-    gaze3d = gaze3d / np.linalg.norm(gaze3d)
-    dx, dy, dz = gaze3d
-    pitch = np.rad2deg(np.arcsin(-dy))  # -dy: 向上为正
-    yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx 表示向左为正
+    Returns:
+        tuple: The pitch and yaw angles in degrees.
+    """
+    if transformation_matrix is not None:
+        gaze_3d = np.dot(transformation_matrix, gaze_3d)
+
+    gaze_3d = gaze_3d / np.linalg.norm(gaze_3d)
+    dx, dy, dz = gaze_3d
+    pitch = np.rad2deg(np.arcsin(-dy))  # -dy: Up is positive
+    yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx: Left is positive
+
     return pitch, yaw
 
 
-def gaze2dTo3d(pitch, yaw, is_degree=True):
-    """
-    右手定则： x朝右, y朝上, z指向相机
+def gaze_2d_to_3d(pitch, yaw, is_degree=True):
+    """Converts 2D pitch and yaw angles to a 3D gaze vector.
+
+    Args:
+        pitch (float or numpy.ndarray): The pitch angle.
+        yaw (float or numpy.ndarray): The yaw angle.
+        is_degree (bool, optional): Whether the angles are in degrees. Defaults to True.
+
+    Returns:
+        numpy.ndarray: The 3D gaze vector.
     """
     if is_degree:
         pitch = np.deg2rad(pitch)
         yaw = np.deg2rad(yaw)
+
     pitch = np.reshape(pitch, (-1, 1))
     yaw = np.reshape(yaw, (-1, 1))
-    batch = np.shape(pitch)[0]
-    gaze = np.zeros((batch, 3))
+    batch_size = np.shape(pitch)[0]
+    gaze = np.zeros((batch_size, 3))
     gaze[:, 0] = np.cos(pitch) * np.sin(yaw)
     gaze[:, 1] = -np.sin(pitch)
     gaze[:, 2] = -np.cos(pitch) * np.cos(yaw)
     gaze = gaze / np.linalg.norm(gaze, axis=1, keepdims=True)
+
     return gaze
 
 
 def cosine_similarity_deg(a, b):
-    a = a / np.linalg.norm(a, axis=1, keepdims=True)
-    b = b / np.linalg.norm(b, axis=1, keepdims=True)
-    ab = np.sum(a * b, axis=1)
-    ab = np.clip(ab, a_min=-float("inf"), a_max=0.999999)
-    loss_rad = np.arccos(ab)  # rad
-    return np.rad2deg(loss_rad)
+    """Calculates the cosine similarity between two vectors and returns the angle in degrees.
+
+    Args:
+        a (numpy.ndarray): First input vector of shape (N, D).
+        b (numpy.ndarray): Second input vector of shape (N, D).
+
+    Returns:
+        numpy.ndarray: Array of angles in degrees between the input vectors.
+    """
+    a_normalized = a / np.linalg.norm(a, axis=1, keepdims=True)
+    b_normalized = b / np.linalg.norm(b, axis=1, keepdims=True)
+    dot_product = np.sum(a_normalized * b_normalized, axis=1)
+    dot_product = np.clip(dot_product, a_min=-1.0, a_max=0.999999)
+    angle_rad = np.arccos(dot_product)  # radians
+    angle_deg = np.rad2deg(angle_rad)
+
+    return angle_deg
 
 
 def compute_euler(rotation_vector, translation_vector):
-    """
-    此函数用于从旋转向量计算欧拉角
-    :param rotation_vector: 输入为旋转向量
-    :return: 返回欧拉角在三个轴上的值
+    """Computes Euler angles from a rotation vector.
+
+    Args:
+        rotation_vector (numpy.ndarray): The rotation vector.
+        translation_vector (numpy.ndarray): The translation vector.
+
+    Returns:
+        numpy.ndarray: The Euler angles (pitch, yaw, roll) in degrees.
     """
     rvec_matrix = cv2.Rodrigues(rotation_vector)[0]
     proj_matrix = np.hstack((rvec_matrix, translation_vector))
-    eulerAngles = -cv2.decomposeProjectionMatrix(proj_matrix)[6]
-    pitch = eulerAngles[0]
-    yaw = eulerAngles[1]
-    roll = eulerAngles[2]
-    rot_params = np.array([pitch, yaw, roll]).flatten()
-    return rot_params
+    euler_angles = -cv2.decomposeProjectionMatrix(proj_matrix)[6]
+    pitch = euler_angles[0]
+    yaw = euler_angles[1]
+    roll = euler_angles[2]
+    rotation_params = np.array([pitch, yaw, roll]).flatten()
+
+    return rotation_params
 
 
 class NormalWarp:
-    def __init__(self, c_mtx, c_dist, distance_norm, focal_norm):
-        self.c_mtx, self.c_dist = c_mtx, c_dist
-        self.c_mtx_inv = np.linalg.inv(self.c_mtx)
+    def __init__(self, camera_matrix, distortion_coeffs, distance_norm, focal_norm):
+        """Initializes the NormalWarp class.
 
-        self.face_pts = np.array([
+        Args:
+            camera_matrix (numpy.ndarray): The camera intrinsic matrix.
+            distortion_coeffs (numpy.ndarray): The camera distortion coefficients.
+            distance_norm (float): Normalized distance between eye and camera.
+            focal_norm (float): Focal length of the normalized camera.
+        """
+        self.camera_matrix = camera_matrix
+        self.distortion_coeffs = distortion_coeffs
+        self.camera_matrix_inv = np.linalg.inv(self.camera_matrix)
+
+        self.face_points = np.array([
             [-45.0968, -21.3129, 21.3129, 45.0968, -26.2996, 26.2996],
             [-0.4838, 0.4838, 0.4838, -0.4838, 68.595, 68.595],
             [2.397, -2.397, -2.397, 2.397, -0.0, -0.0]
         ])
-        self.face_pts_t = self.face_pts.T.reshape(-1, 1, 3)
+        self.face_points_t = self.face_points.T.reshape(-1, 1, 3)
 
-        self.distance_norm = distance_norm  # normalized distance between eye and camera
-        focal_norm = focal_norm  # focal length of normalized camera
-        self.roiSize = (448, 448)  # size of cropped eye image
-        self.n_ctx = np.array([
-            [focal_norm, 0, self.roiSize[0] / 2],
-            [0, focal_norm, self.roiSize[1] / 2],
+        self.distance_norm = distance_norm
+        self.roi_size = (448, 448)
+        self.normalized_camera_matrix = np.array([
+            [focal_norm, 0, self.roi_size[0] / 2],
+            [0, focal_norm, self.roi_size[1] / 2],
             [0, 0, 1.0],
         ])
 
     def estimate_head_pose(self, landmarks, iterate=True):
+        """Estimates the head pose from facial landmarks.
+
+        Args:
+            landmarks (numpy.ndarray): Array of shape (N, 2) containing the facial landmarks.
+            iterate (bool, optional): Whether to further optimize the pose estimation. Defaults to True.
+
+        Returns:
+            tuple: Rotation vector, translation vector, and Euler angles.
+        """
         landmarks = np.reshape(landmarks, (-1, 2))
-        ret, rvec, tvec = cv2.solvePnP(
-            self.face_pts_t, landmarks, self.c_mtx, self.c_dist, flags=cv2.SOLVEPNP_EPNP
+        _, rotation_vector, translation_vector = cv2.solvePnP(
+            self.face_points_t, landmarks, self.camera_matrix, self.distortion_coeffs, flags=cv2.SOLVEPNP_EPNP
         )
 
-        # further optimize
         if iterate:
-            ret, rvec, tvec = cv2.solvePnP(
-                self.face_pts_t, landmarks, self.c_mtx, self.c_dist, rvec, tvec, True
+            _, rotation_vector, translation_vector = cv2.solvePnP(
+                self.face_points_t, landmarks, self.camera_matrix, self.distortion_coeffs, rotation_vector,
+                translation_vector, True
             )
-        head_euler = compute_euler(rvec, tvec)
-        return rvec, tvec, head_euler
+        head_euler = compute_euler(rotation_vector, translation_vector)
+        return rotation_vector, translation_vector, head_euler
 
     def __call__(self, image, landmarks):
-        hr, ht, _ = self.estimate_head_pose(landmarks)
+        """Normalizes and warps the face in the image based on facial landmarks.
 
-        # compute estimated 3D positions of the landmarks
-        ht = np.repeat(ht, 6, axis=1)  # 6 points
-        hR = cv2.Rodrigues(hr)[0]  # converts rotation vector to rotation matrix
-        Fc = np.dot(hR, self.face_pts) + ht  # 3D positions of facial landmarks
-        face_center = np.sum(Fc, axis=1, dtype=np.float32) / 6.0  # 人脸中心点
+        Args:
+            image (numpy.ndarray): The input image.
+            landmarks (numpy.ndarray): Array of shape (N, 2) containing the facial landmarks.
 
-        # ---------- normalize image ----------
-        distance = np.linalg.norm(face_center)  # actual distance face center and original camera
+        Returns:
+            tuple: The warped face image, rotation matrix, and warp matrix.
+        """
+        rotation_vector, translation_vector, _ = self.estimate_head_pose(landmarks)
 
-        # 计算新的坐标系，右眼指向左眼为x轴；嘴巴的中点向眼睛连线作垂线，向下为y轴；垂直于xy为z轴，方向是相机指向新坐标系原点
+        translation_vector = np.repeat(translation_vector, 6, axis=1)
+        rotation_matrix = cv2.Rodrigues(rotation_vector)[0]
+        face_center_3d = np.dot(rotation_matrix, self.face_points) + translation_vector
+        face_center = np.sum(face_center_3d, axis=1, dtype=np.float32) / 6.0
+
+        distance = np.linalg.norm(face_center)
         face_center /= distance
         forward = face_center.reshape(3)
-        hR = cv2.Rodrigues(hr)[0]
-        hRx = hR[:, 0]
-        down = np.cross(forward, hRx)
+        rotation_matrix = cv2.Rodrigues(rotation_vector)[0]
+        right = rotation_matrix[:, 0]
+        down = np.cross(forward, right)
         down /= np.linalg.norm(down)
         right = np.cross(down, forward)
         right /= np.linalg.norm(right)
-        m_mtx = np.c_[right, down, forward].T  # rotation matrix R
+        rotation_matrix = np.c_[right, down, forward].T
 
-        s_mtx = np.array([
+        scale_matrix = np.array([
             [1.0, 0.0, 0.0],
             [0.0, 1.0, 0.0],
             [0.0, 0.0, self.distance_norm / distance],
         ])
-        w_mtx = np.dot(
-            np.dot(self.n_ctx, s_mtx),
-            np.dot(m_mtx, self.c_mtx_inv)
-        )  # (C_norm . M . C_c-1)
+        warp_matrix = np.dot(
+            np.dot(self.normalized_camera_matrix, scale_matrix),
+            np.dot(rotation_matrix, self.camera_matrix_inv)
+        )
 
-        # ---------裁剪人脸图片---------
-        face_image = cv2.warpPerspective(image, w_mtx, self.roiSize)
-        return face_image, m_mtx, w_mtx
+        face_image = cv2.warpPerspective(image, warp_matrix, self.roi_size)
+        return face_image, rotation_matrix, warp_matrix
 
 
 # =====================deprecated==========
-@deprecated
-def create_labelme_json(img, basename, shapes):
-    base64_str = cv2.imencode(".jpg", img)[1]
-    height, width = img.shape[:2]
-    return {
-        "version": "5.2.0.post4",
-        "flags": {},
-        "shapes": shapes,
-        "imagePath": basename,
-        "imageData": base64.b64encode(base64_str).decode(),
-        "imageHeight": height,
-        "imageWidth": width,
-    }
 
+def deprecated(func):
+    """
+    这是一个装饰器，用于标记函数为已弃用。当使用该函数时，会发出警告。
 
-@deprecated
-def move_txt_jpg(path, dst_folder, copy=True, do=False, postfixes=None):
-    if postfixes is None:
-        postfixes = [".txt", ".jpg", ".png"]
-    os.makedirs(dst_folder, exist_ok=True)
-    prefix = osp.splitext(path)[0]
-    dirname = osp.dirname(prefix)
-    basename = osp.basename(prefix)
-    for postfix in postfixes:
-        src = osp.join(dirname, basename + postfix)
-        if osp.exists(src):
-            dst = osp.join(dst_folder, basename + postfix)
-            if not osp.exists(dst):
-                if do:
-                    if copy:
-                        shutil.copy(src, dst)
-                    else:
-                        shutil.move(src, dst)
-                else:
-                    print("[move_txt_jpg]: ", src, dst)
+    Args:
+        func (function): 被装饰的函数。
 
+    Returns:
+        function: 包装后的新函数。
+    """
 
-@deprecated
-def get_img_base64(img, quality=100):
-    img_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-    base64_str = cv2.imencode(".jpg", img, img_param)[1]
-    return base64.b64encode(base64_str).decode()
-
-
-@deprecated
-def make_labelme_shape(label: str, pts, stype: str):
-    pts = np.reshape(pts, [-1, 2]).squeeze().tolist()
-    return {
-        "label": label,
-        "points": pts,
-        "group_id": None,
-        "shape_type": stype,
-        "flags": {}
-    }
-
-
-@deprecated
-def img2str(img):
-    img_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
-    base64_str = cv2.imencode(".jpg", img, img_param)[1]
-    return base64.b64encode(base64_str).decode()
-
-
-@deprecated
-def pixel2d2camera3d(pt_2d, z, mtx, dist):
-    if np.ndim(z) > 1:
-        x, y = map(lambda x: int(x), pt_2d)
-        z = z[y, x]
-    if z == 0:
-        return None, None
-    k1, k2, p1, p2, k3 = np.squeeze(dist)
-    cx, cy = mtx[0, 2], mtx[1, 2]
-    fx, fy = mtx[0, 0], mtx[1, 1]
-    u, v = pt_2d
-    x, y = (u - cx) / fx, (v - cy) / fy
-
-    # ===============================
-    r = np.sqrt(x ** 2 + y ** 2)
-    k = 1 + k1 * r ** 2 + k2 * r ** 4 + k3 * r ** 6
-    xy = x * y
-    x_distorted = x * k + 2 * p1 * xy + p2 * (r ** 2 + 2 * x ** 2)
-    y_distorted = y * k + 2 * p2 * xy + p1 * (r ** 2 + 2 * y ** 2)
-    # =====x -> x_distorted=========y -> y_distorted=================
-
-    u_distorted = fx * x_distorted + cx
-    v_distorted = fy * y_distorted + cy
-
-    homo_uv1 = np.array([u_distorted, v_distorted, 1])
-    pc_xy1 = np.linalg.inv(mtx) @ homo_uv1  # p camera
-    pc_xyz = pc_xy1 * z
-    return pc_xyz, z
-
-
-@deprecated
-def image_norm(image):
-    image = (image - np.min(image)) / (np.max(image) - np.min(image) + 1e-3)
-    return (image * 255).astype(np.uint8)
-
-
-@deprecated
-def parse_json_dict(path):
-    try:
-        fo = open(path, "r")
-        info = json.load(fo)
-        fo.close()
-    except Exception as why:
-        print("[parse_json] \nwhy?\n", why)
-        print(f"error: {path}")
-        return [], None, ""
-    base64_str = info.get("imageData", None)
-    all_info = defaultdict(list)
-    if base64_str is None:
-        img = None
-    else:
-        img_str = base64.b64decode(base64_str)
-        np_arr = np.fromstring(img_str, np.uint8)
-        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    if img is None:
-        image_height = info.get("imageHeight", None)
-        image_width = info.get("imageWidth", None)
-    else:
-        image_height, image_width = img.shape[:2]
-    for shape in info.get("shapes", []):
-        obj = LabelObject()
-        obj.label = shape.get("label", None)
-        obj.pts = shape.get("points", [])
-        obj.type = shape.get("shape_type", "")
-        obj.height = image_height
-        obj.width = image_width
-        # =====processed=======
-        obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array(
-            [image_width, image_height]
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # 关闭过滤器
+        warnings.warn(
+            f"调用已弃用的函数 {func.__name__}.",
+            category=DeprecationWarning,
+            stacklevel=2
         )
-        all_info[obj.label].append(obj)
-    return all_info, img, osp.basename(path).split(".")[0]
+        warnings.simplefilter('default', DeprecationWarning)  # 恢复过滤器
+        return func(*args, **kwargs)
 
-
-@deprecated
-def show_yolo_txt(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
-    img = cv2.imread(jpg_path)
-    txt = osp.splitext(jpg_path)[0] + ".txt"
-    with open(txt, "r") as fo:
-        lines = fo.readlines()
-    img = show_yolo_label(img, lines, xywh, classes, colors, thickness)
-    img = put_text(img, osp.basename(jpg_path))
-    return img
+    return new_func
