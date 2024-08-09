@@ -12,5 +12,5 @@ setup(
 
     packages=find_packages(),  # 需要打包的目录列表
     platforms="any",
-    install_requires=["numpy", "opencv-python", "matplotlib", "Pillow", "einops"]  # 这个项目依赖的第三方库
+    install_requires=["numpy<2.0.0", "opencv-python", "matplotlib", "Pillow", "einops"]  # 这个项目依赖的第三方库
 )
