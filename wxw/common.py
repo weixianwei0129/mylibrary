@@ -17,6 +17,7 @@ import matplotlib.pylab as plt
 from multiprocessing import Pool
 from collections import defaultdict
 
+import argparse
 import warnings
 import functools
 import matplotlib.font_manager as fm
@@ -72,6 +73,23 @@ class ONNXRunner:
 
 
 # =============基础方法===============
+def update_args(old_, new_) -> argparse.Namespace:
+    import yaml
+    if isinstance(old_, argparse.Namespace):
+        old_ = vars(old_)
+    elif isinstance(new_, argparse.Namespace):
+        new_ = vars(new_)
+
+    if isinstance(old_, str) and old_.endswith('.yaml'):
+        with open(old_, 'r') as file:
+            old_ = yaml.safe_load(file)
+    elif isinstance(new_, str) and new_.endswith('.yaml'):
+        with open(new_, 'r') as file:
+            new_ = yaml.safe_load(file)
+    assert isinstance(old_, dict) and isinstance(new_, dict)
+    old_.update(new_)
+    return argparse.Namespace(**old_)
+
 
 def safe_replace(src, _old, _new):
     dst = src.replace(_old, _new)
@@ -310,7 +328,19 @@ def merge_path(path, flag):
     return '_'.join(sp[idx:])
 
 
-def move_file_pairs(path, dst_folder, dst_name=None, postfixes=None, copy=True, do=False):
+def move_file_pairs(
+        path,
+        dst_folder,
+        dst_name=None,
+        postfixes=None,
+        copy=True,
+        do=False,
+        empty_undo=False,
+        empty_del=False
+):
+    if empty_undo and os.path.getsize(path) == 0:
+        if empty_del: os.remove(path)
+        return
     prefix, self_post = osp.splitext(path)
     if postfixes is None:
         postfixes = [self_post]
@@ -431,7 +461,18 @@ def video2images(args):
 
 
 def pad_image(img, target=None, board_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), centre=True):
-    """"""
+    """
+
+    Args:
+        img:
+        target:  如何没有提供target，那么短边被填充到和长边一样的尺寸
+        board_type:
+        value:
+        centre:
+
+    Returns:
+
+    """
     height, width = img.shape[:2]
     if target is None:
         t_h = t_w = max(height, width)
@@ -529,6 +570,15 @@ def size_pre_process(img, longest=4096, **kwargs):
         else:
             interpolation = cv2.INTER_AREA
     return cv2.resize(img, (rw, rh), interpolation=interpolation)
+
+
+def center_crop(image):
+    height, width = image.shape[:2]
+    side = min(height, width)
+    x = int(np.ceil((width - side) // 2))
+    y = int(np.ceil((height - side) // 2))
+    image = image[y: y + side, x: x + side, ...]
+    return image, x, y
 
 
 def cv_img_to_base64(img, quality=100):
@@ -658,7 +708,7 @@ def put_text(
         text_color = 255 if is_gray else (255, 255, 255)
     height, width = im0.shape[:2]
     if tl is None:  # base 30 for pillow equal 1 for opencv
-        tl = round(0.05 * np.sqrt(height ** 2 + width ** 2)) + 1
+        tl = round(0.01 * np.sqrt(height ** 2 + width ** 2)) + 1
     has_chinese_char = has_chinese(text)
 
     # ==========write===========
@@ -822,7 +872,10 @@ def imshow(name, img, ori=False, t=0, cmp=113):
     return key
 
 
-def imwrite(path, img):
+def imwrite(path, img, overwrite=True):
+    if not overwrite and osp.exists(path):
+        print(f"{path} is existed!")
+        return
     os.makedirs(osp.dirname(path), exist_ok=True)
     cv2.imwrite(path, img)
 
@@ -966,7 +1019,7 @@ def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
     return obj_list, img, basename
 
 
-def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
+def show_yolo_label2(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
     if classes is None:
         classes = {}
         for i in range(10):
@@ -1000,14 +1053,56 @@ def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, th
     return img, pts
 
 
+def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, thickness=2):
+    if classes is None:
+        classes = {}
+        for i in range(10):
+            classes[i] = i
+    if colors is None:
+        colors = make_color_table(len(classes))
+    mask = np.zeros_like(img)
+    height, width = img.shape[:2]
+    for line in lines:
+        if not line: continue
+        sp = line.strip().split(" ")
+        idx, a, b, c, d = [float(x) for x in sp]
+        if xywh:
+            x1, y1, x2, y2 = (
+                    xywh2xyxy([a, b, c, d]) * np.array([width, height, width, height])
+            ).astype(int)
+        else:
+            x1, y1, x2, y2 = (
+                    np.array([a, b, c, d]) * np.array([width, height, width, height])
+            ).astype(int)
+
+        if thickness == -1:
+            mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)
+        else:
+            img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
+        img = put_text(img, classes[idx], (x1, y1), (0, 0, 0), (222, 222, 222))
+    if thickness == -1:
+        img = cv2.addWeighted(img, 0.7, mask, 0.3, 1)
+    return img
+
+
+def show_yolo_file2(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
+    img = cv2.imread(jpg_path)
+    txt = osp.splitext(jpg_path)[0] + ".txt"
+    with open(txt, "r") as fo:
+        lines = fo.readlines()
+    img, pts = show_yolo_label2(img, lines, xywh, classes, colors, thickness)
+    img = put_text(img, osp.basename(jpg_path))
+    return img, pts
+
+
 def show_yolo_file(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
     img = cv2.imread(jpg_path)
     txt = osp.splitext(jpg_path)[0] + ".txt"
     with open(txt, "r") as fo:
         lines = fo.readlines()
-    img, pts = show_yolo_label(img, lines, xywh, classes, colors, thickness)
+    img, pts = show_yolo_label2(img, lines, xywh, classes, colors, thickness)
     img = put_text(img, osp.basename(jpg_path))
-    return img, pts
+    return img
 
 
 # =========Warp face from insightface=======
