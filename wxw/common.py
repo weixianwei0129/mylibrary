@@ -126,19 +126,24 @@ def update_args(old_, new_) -> argparse.Namespace:
     return argparse.Namespace(**old_)
 
 
-def safe_replace(src: str, _old: str, _new: str) -> str:
+def safe_replace(src: str, _old, _new) -> str:
     """
     Safely replace occurrences of _old with _new in src.
 
     Args:
         src (str): The source string.
-        _old (str): The substring to be replaced.
-        _new (str): The substring to replace with.
+        _old (list or str): The substring to be replaced.
+        _new (list or str): The substring to replace with.
 
     Returns:
         str: The modified string, or None if no replacement was made.
     """
-    dst = src.replace(_old, _new)
+    if isinstance(_old, str):
+        _old = [_old]
+        _new = [_new]
+    assert len(_old) == len(_new)
+    for _o, _n in zip(_old, _new):
+        dst = src.replace(_o, _n)
     if dst == src:
         print("No replacement made!")
         return None
@@ -400,6 +405,8 @@ def multi_process(process_method, data_to_process, num_threads=1):
             thread_idx, data_to_process = args
             # Processing code here
 
+        import torch.multiprocessing as mp
+        mp.set_start_method('spawn')
         multi_process(process_method, data_to_process, num_threads=4)
     """
     if num_threads == 1:
@@ -439,20 +446,25 @@ def simplify_number(decimal):
 
 
 # =========Files: 文件移动和写入============
-def merge_path(path, flag):
+def merge_path(path, flag, ignore=None):
     """Merge a path from a specific flag.
 
     Args:
         path (str): The original path.
         flag (str): The flag to start merging from.
+        ignore (list): Ignore parts
 
     Returns:
         str: The merged path starting from the flag.
     """
+    if ignore is None:
+        ignore = []
     path_parts = path.split(os.sep)
     flag_index = path_parts.index(flag)
-    merged_path = '_'.join(path_parts[flag_index:])
-    return merged_path
+    path_parts = path_parts[flag_index:]
+    for i, x in enumerate(ignore):
+        path_parts.pop(x + i)
+    return '_'.join(path_parts)
 
 
 def move_file_pair(
@@ -463,19 +475,24 @@ def move_file_pair(
         copy=True,
         execute=False,
         empty_undo=False,
-        empty_delete=False
+        empty_delete=False,
+        ignore_failed=False,
+        overwrite=False,
 ):
     """Move or copy file pairs to a destination folder.
 
     Args:
         path (str): The source file path.
         dst_folder (str): The destination folder.
-        dst_name (str, optional): The destination file name. Defaults to None.
+        dst_name (str, optional): The destination file name without postfix. Defaults to None.
         postfixes (list, optional): List of postfixes to consider. Defaults to None.
         copy (bool, optional): Whether to copy instead of move. Defaults to True.
         execute (bool, optional): Whether to execute the move/copy. Defaults to False.
         empty_undo (bool, optional): Whether to undo if the file is empty. Defaults to False.
         empty_delete (bool, optional): Whether to delete the file if it is empty. Defaults to False.
+        ignore_failed (bool, optional): Whether to ignore the options that failed to move or copy. Defaults to False.
+        overwrite (bool, optional): Whether to overwrite the file if it exists. Defaults to True.
+        
 
     Returns:
         None
@@ -495,6 +512,7 @@ def move_file_pair(
     if dst_name is None:
         dst_name = src_name
     else:
+        # simple check
         for postfix in postfixes:
             postfix_length = len(postfix)
             if postfix == dst_name[-postfix_length:]:
@@ -505,13 +523,17 @@ def move_file_pair(
         src = osp.join(src_dir, src_name + postfix)
         if osp.exists(src):
             dst = osp.join(dst_folder, dst_name + postfix)
-            if not osp.exists(dst):
+            if overwrite or not osp.exists(dst):
                 if execute:
                     os.makedirs(dst_folder, exist_ok=True)
-                    if copy:
-                        shutil.copy(src, dst)
-                    else:
-                        shutil.move(src, dst)
+                    try:
+                        if copy:
+                            shutil.copy(src, dst)
+                        else:
+                            shutil.move(src, dst)
+                    except Exception as e:
+                        if not ignore_failed:
+                            raise Exception(e)
                 else:
                     print("[move_file_pairs]: ", src, dst)
 
