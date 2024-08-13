@@ -387,7 +387,7 @@ def create_color_list(num_colors):
     else:
         colors = np.array(plt.cm.tab20.colors)
 
-    colors = (colors[:num_colors - 1, ::-1] * 255).astype(np.uint8)
+    colors = (colors[:num_colors - 1, ::-1] * 255)
     colors = np.insert(colors, 0, (0, 0, 0), axis=0)
     return [tuple(x) for x in colors]
 
@@ -1464,7 +1464,7 @@ def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, th
         if thickness == -1:
             mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)
         else:
-            img = cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 0, 0), thickness=thickness)
+            img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
         img = put_text(img, str(classes[idx]), (x1, y1), (0, 0, 0), (222, 222, 222))
         pts.append([idx, x1, y1, x2, y2])
     if thickness == -1:
