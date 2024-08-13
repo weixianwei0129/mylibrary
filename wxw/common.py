@@ -389,7 +389,7 @@ def create_color_list(num_colors):
 
     colors = (colors[:num_colors - 1, ::-1] * 255).astype(np.uint8)
     colors = np.insert(colors, 0, (0, 0, 0), axis=0)
-    return colors
+    return [tuple(x) for x in colors]
 
 
 def multi_process(process_method, data_to_process, num_threads=1):
@@ -555,6 +555,7 @@ def save_txt_jpg(path, image, content):
     # Create the .png file path
     png_path = path.replace(file_extension, '.png')
 
+    os.makedirs(osp.dirname(png_path), exist_ok=True)
     # Save the image as a .png file
     cv2.imwrite(png_path, image)
 
@@ -655,7 +656,7 @@ def video2images(args):
 # ===============图像处理===============
 
 
-def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), center=True):
+def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), center=True, align=8):
     """Pad an image to a target size.
 
     Args:
@@ -664,6 +665,7 @@ def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)
         border_type (int, optional): The border type to use. Defaults to cv2.BORDER_CONSTANT.
         value (tuple, optional): The border color value. Defaults to (0, 0, 0).
         center (bool, optional): Whether to center the image. Defaults to True.
+        align (int, optional): Alignment value for divisibility. Defaults to 8.
 
     Returns:
         tuple: The padded image, left padding, and top padding.
@@ -677,6 +679,10 @@ def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)
             target_height = target_width = target
         else:
             target_width, target_height = target
+            assert target_width >= width, f"pad value too small: {[width, height]} -> {target}"
+            assert target_height >= height, f"pad value too small: {[width, height]} -> {target}"
+
+    target_height, target_width = (divisibility(x) for x in [target_height, target_width])
 
     top, left = 0, 0
     if center:
@@ -749,7 +755,6 @@ def size_pre_process(image, max_length=4096, **kwargs):
             - long (int, optional): Target size for the longer dimension.
             - height (int, optional): Target height for resizing.
             - width (int, optional): Target width for resizing.
-            - letterbox
 
     Returns:
         numpy.ndarray: The resized image.
@@ -933,62 +938,6 @@ def rotate_location(angle, rect):
     y3_new = (x3 - x) * sin_angle + (y3 - y) * cos_angle + y
 
     return [(x0_new, y0_new), (x1_new, y1_new), (x2_new, y2_new), (x3_new, y3_new)]
-
-
-def letterbox(
-        image,
-        new_shape=640,
-        color=(114, 114, 114),
-        auto=True,
-        scale_fill=False,
-        scale_up=True,
-        stride=32,
-):
-    """Resizes and pads an image while meeting stride-multiple constraints.
-
-    Args:
-        image (numpy.ndarray): The input image to be resized and padded.
-        new_shape (int or tuple, optional): The target shape for the image. If an integer is provided, both width and height will be set to this value. Defaults to 640.
-        color (tuple, optional): The color value for padding. Defaults to (114, 114, 114).
-        auto (bool, optional): Whether to automatically adjust padding to the minimum rectangle. Defaults to True.
-        scale_fill (bool, optional): Whether to stretch the image to fill the new shape. Defaults to False.
-        scale_up (bool, optional): Whether to allow scaling up of the image. Defaults to True.
-        stride (int, optional): The stride value for padding. Defaults to 32.
-
-    Returns:
-        tuple: The resized and padded image, the scale ratio, and the padding values (dw, dh).
-    """
-    shape = image.shape[:2]  # current shape [height, width]
-    if isinstance(new_shape, int):
-        new_shape = (new_shape, new_shape)
-
-    # Scale ratio (new / old)
-    scale_ratio = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-    if not scale_up:  # only scale down, do not scale up (for better validation mAP)
-        scale_ratio = min(scale_ratio, 1.0)
-
-    # Compute padding
-    ratio = scale_ratio, scale_ratio  # width, height ratios
-    new_unpadded = int(round(shape[1] * scale_ratio)), int(round(shape[0] * scale_ratio))
-    dw, dh = new_shape[1] - new_unpadded[0], new_shape[0] - new_unpadded[1]  # width, height padding
-    if auto:  # minimum rectangle
-        dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # width, height padding
-    elif scale_fill:  # stretch
-        dw, dh = 0.0, 0.0
-        new_unpadded = (new_shape[1], new_shape[0])
-        ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
-
-    dw /= 2  # divide padding into 2 sides
-    dh /= 2
-
-    if shape[::-1] != new_unpadded:  # resize
-        image = cv2.resize(image, new_unpadded, interpolation=cv2.INTER_LINEAR)
-    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    image = cv2.copyMakeBorder(
-        image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
-    )  # add border
-    return image, ratio, (dw, dh)
 
 
 # =============图像debug=============
@@ -1515,7 +1464,7 @@ def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, th
         if thickness == -1:
             mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)
         else:
-            img = cv2.rectangle(img, (x1, y1), (x2, y2), colors[idx], thickness)
+            img = cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 0, 0), thickness=thickness)
         img = put_text(img, str(classes[idx]), (x1, y1), (0, 0, 0), (222, 222, 222))
         pts.append([idx, x1, y1, x2, y2])
     if thickness == -1:
