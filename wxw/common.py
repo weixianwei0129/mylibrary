@@ -423,8 +423,8 @@ def move_file_pair(
         postfixes=None,
         copy=True,
         execute=False,
-        empty_undo=False,
-        empty_delete=False,
+        move_empty_file=True,
+        delete_empty_file=False,
         ignore_failed=False,
         overwrite=False,
 ):
@@ -437,8 +437,8 @@ def move_file_pair(
         postfixes (list, optional): List of postfixes to consider. Defaults to None.
         copy (bool, optional): Whether to copy instead of move. Defaults to True.
         execute (bool, optional): Whether to execute the move/copy. Defaults to False.
-        empty_undo (bool, optional): Whether to undo if the file is empty. Defaults to False.
-        empty_delete (bool, optional): Whether to delete the file if it is empty. Defaults to False.
+        move_empty_file (bool, optional): Whether to move if the file is empty. Defaults to True.
+        delete_empty_file (bool, optional): Whether to delete the file if it is empty. Defaults to False.
         ignore_failed (bool, optional): Whether to ignore the options that failed to move or copy. Defaults to False.
         overwrite (bool, optional): Whether to overwrite the file if it exists. Defaults to True.
         
@@ -446,11 +446,7 @@ def move_file_pair(
     Returns:
         None
     """
-    if empty_undo and os.path.getsize(path) == 0:
-        if empty_delete:
-            os.remove(path)
-        return
-
+    # NOTE: 'self_postfix' will be the last part after splitting by '.'
     prefix, self_postfix = osp.splitext(path)
     if postfixes is None:
         postfixes = [self_postfix]
@@ -470,10 +466,19 @@ def move_file_pair(
 
     for postfix in postfixes:
         src = osp.join(src_dir, src_name + postfix)
+
+        if (delete_empty_file or not move_empty_file) and os.path.getsize(src) == 0:
+            if delete_empty_file: os.remove(path)
+            return
+
         if osp.exists(src):
             dst = osp.join(dst_folder, dst_name + postfix)
-            if overwrite or not osp.exists(dst):
-                if execute:
+            if not execute:
+                print(f"[move_file_pair]: {src} -> {dst}")
+            else:
+                if overwrite and osp.exists(dst):
+                    os.remove(dst)
+                if not osp.exists(dst):
                     os.makedirs(dst_folder, exist_ok=True)
                     try:
                         if copy:
@@ -483,8 +488,6 @@ def move_file_pair(
                     except Exception as e:
                         if not ignore_failed:
                             raise Exception(e)
-                else:
-                    print("[move_file_pairs]: ", src, dst)
 
 
 def save_txt_jpg(path, image, content):
