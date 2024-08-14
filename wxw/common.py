@@ -1,83 +1,31 @@
 import argparse
 import base64
-import collections
-import functools
-import glob
 import hashlib
 import json
+import yaml
 import os
 import os.path as osp
 import random
 import shutil
 import time
-import warnings
-from collections import defaultdict
-from functools import partial
-from io import BytesIO
-from multiprocessing import Pool
-import yaml
 import cv2
+from functools import partial
+from functools import wraps
+from collections import defaultdict
+from typing import Optional, Union, List
+from multiprocessing import Pool
 import matplotlib.font_manager as fm
 import matplotlib.pylab as plt
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from PIL import __version__ as pl_version
-from functools import wraps
 
 # Set random seeds for reproducibility
 np.random.seed(123456)
 random.seed(123456)
 
 
-# ========inference=====
-
-class ONNXRunner:
-    """
-    A class to run ONNX models using ONNX Runtime.
-
-    Attributes:
-        session (onnxruntime.InferenceSession): The ONNX Runtime session for inference.
-    """
-
-    def __init__(self, path):
-        """
-        Initializes the ONNXRunner with the given model path.
-
-        Args:
-            path (str): The path to the ONNX model file.
-        """
-        import onnxruntime
-        providers = [
-            "CUDAExecutionProvider", "CoreMLExecutionProvider", "CPUExecutionProvider"
-        ]
-        self.session = onnxruntime.InferenceSession(path, providers=providers)
-        print("Inputs: ", [input.name for input in self.session.get_inputs()])
-        print("Outputs: ", [output.name for output in self.session.get_outputs()])
-
-    def __call__(self, img):
-        """
-        Runs inference on the provided image.
-
-        Args:
-            img (numpy.ndarray): The input image for inference.
-
-        Returns:
-            list: The inference results.
-        """
-        try:
-            return self.session.run(
-                [output.name for output in self.session.get_outputs()],
-                {self.session.get_inputs()[0].name: img},
-            )
-        except Exception as e:
-            print("[ONNXRunner] Error during inference:")
-            print(e)
-            print("Input details:", self.session.get_inputs()[0])
-            print("Image shape:", img.shape)
-
-
 # =============基础方法===============
-# Terminal color output functions
 def print_red(text):
     """Print text in red color."""
     print(f"\033[31m{text}\033[0m")
@@ -96,6 +44,27 @@ def print_yellow(text):
 def print_blue(text):
     """Print text in blue color."""
     print(f"\033[34m{text}\033[0m")
+
+
+def print_format(string: str, a: float, func: str, b: float) -> float:
+    """
+    Format and print a mathematical operation, then return the result.
+
+    Args:
+        string (str): The description of the operation.
+        a (float): The first operand.
+        func (str): The operator as a string (e.g., '+', '-', '*', '/').
+        b (float): The second operand.
+
+    Returns:
+        float: The result of the operation.
+    """
+    formatted_string = f"{a:<5.3f} {func} {b:<5.3f}"
+    if func == '/':
+        b += 1e-4  # Avoid division by zero
+    c = eval(f"{a} {func} {b}")
+    print(f"{string:<20}: {formatted_string} = {c:.3f}")
+    return c
 
 
 def update_args(old_, new_) -> argparse.Namespace:
@@ -126,7 +95,7 @@ def update_args(old_, new_) -> argparse.Namespace:
     return argparse.Namespace(**old_)
 
 
-def safe_replace(src: str, _old, _new) -> str:
+def safe_replace(src: str, _old: Union[str, List[str]], _new: Union[str, List[str]]) -> Optional[str]:
     """
     Safely replace occurrences of _old with _new in src.
 
@@ -142,6 +111,7 @@ def safe_replace(src: str, _old, _new) -> str:
         _old = [_old]
         _new = [_new]
     assert len(_old) == len(_new)
+    dst = src
     for _o, _n in zip(_old, _new):
         dst = src.replace(_o, _n)
     if dst == src:
@@ -168,27 +138,6 @@ def md5sum(file_path: str) -> str:
                 break
             md5_hash.update(data)
     return md5_hash.hexdigest()
-
-
-def print_format(string: str, a: float, func: str, b: float) -> float:
-    """
-    Format and print a mathematical operation, then return the result.
-
-    Args:
-        string (str): The description of the operation.
-        a (float): The first operand.
-        func (str): The operator as a string (e.g., '+', '-', '*', '/').
-        b (float): The second operand.
-
-    Returns:
-        float: The result of the operation.
-    """
-    formatted_string = f"{a:<5.3f} {func} {b:<5.3f}"
-    if func == '/':
-        b += 1e-4  # Avoid division by zero
-    c = eval(f"{a} {func} {b}")
-    print(f"{string:<20}: {formatted_string} = {c:.3f}")
-    return c
 
 
 def divisibility(a: float, r: int = 32) -> int:
@@ -357,7 +306,7 @@ def clockwise_points(pts):
     return [pts[index_1], pts[index_2], pts[index_3], pts[index_4]]
 
 
-def generate_random_color(min_value, max_value):
+def generate_random_color(min_value, max_value) -> tuple:
     """Generate a random color.
 
     Args:
@@ -370,7 +319,7 @@ def generate_random_color(min_value, max_value):
     blue = np.random.randint(min_value, max_value)
     green = np.random.randint(min_value, max_value)
     red = np.random.randint(min_value, max_value)
-    return blue, green, red
+    return tuple([blue, green, red])
 
 
 def create_color_list(num_colors):
@@ -606,53 +555,6 @@ def plt2array():
     return np.asarray(image)
 
 
-def video2images(args):
-    """Extract frames from videos and save them as images.
-
-    Args:
-        args (list): A list containing the thread index and a list of video paths.
-
-    Example:
-        if __name__ == "__main__":
-            pattern = "xxx/*/*/*.mp4"
-            all_data = glob.glob(pattern)
-            print("total: ", len(all_data))
-            cm.multi_process(video2images, all_data, num_threads=4)
-    """
-    thread_idx, all_videos = args
-    print(f"{thread_idx} processing ", len(all_videos))
-
-    for video in all_videos:
-        folder = os.path.splitext(video)[0]
-        saved = 0
-
-        if os.path.exists(folder):
-            saved = len(glob.glob(os.path.join(folder, "*.png")))
-        else:
-            os.makedirs(folder, exist_ok=True)
-
-        cap = cv2.VideoCapture(video)
-        index = 0
-        ret, frame = cap.read()
-
-        while ret:
-            if index < saved:
-                ret, frame = cap.read()
-                index += 1
-                continue
-
-            if index % 1 == 0:
-                new_path = os.path.join(folder, f"{str(index).zfill(5)}.png")
-                cv2.imwrite(new_path, frame)
-
-            index += 1
-            ret, frame = cap.read()
-
-        cap.release()
-
-    print(f"{thread_idx} Finished!")
-
-
 # ===============图像处理===============
 
 
@@ -682,7 +584,7 @@ def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)
             assert target_width >= width, f"pad value too small: {[width, height]} -> {target}"
             assert target_height >= height, f"pad value too small: {[width, height]} -> {target}"
 
-    target_height, target_width = (divisibility(x) for x in [target_height, target_width])
+    target_height, target_width = (divisibility(x, r=align) for x in [target_height, target_width])
 
     top, left = 0, 0
     if center:
@@ -705,7 +607,8 @@ def random_pad_image(image, target_size, border_type=cv2.BORDER_CONSTANT, border
 
     Args:
         image (numpy.ndarray): The input image to be padded.
-        target_size (int or tuple): The target size for padding. If an integer is provided, both width and height will be set to this value. If a tuple is provided, it should be in the form (width, height).
+        target_size (int or tuple): The target size for padding. If an integer is provided, both width and height will
+        be set to this value. If a tuple is provided, it should be in the form (width, height).
         border_type (int, optional): Border type to be used for padding. Defaults to cv2.BORDER_CONSTANT.
         border_value (tuple, optional): Border color value for padding. Defaults to (0, 0, 0).
 
@@ -811,17 +714,18 @@ def size_pre_process(image, max_length=4096, **kwargs):
     return cv2.resize(image, (target_width, target_height), interpolation=interpolation_method)
 
 
-def center_crop(image):
+def center_crop(image, size=np.inf):
     """Crops the center of the image to create a square image.
 
     Args:
         image (numpy.ndarray): The input image to be cropped.
+        size (int, optional): size of cropped. default inf
 
     Returns:
         tuple: The cropped image and the x, y coordinates of the top-left corner of the cropped area.
     """
     height, width = image.shape[:2]
-    side_length = min(height, width)
+    side_length = min(height, width, size)
     x_offset = int(np.ceil((width - side_length) // 2))
     y_offset = int(np.ceil((height - side_length) // 2))
     cropped_image = image[y_offset: y_offset + side_length, x_offset: x_offset + side_length, ...]
@@ -844,19 +748,6 @@ def cv_img_to_base64(image, quality=100):
     return base64_str
 
 
-def distance(point1, point2):
-    """Calculates the Euclidean distance between two points.
-
-    Args:
-        point1 (tuple): The first point (x, y).
-        point2 (tuple): The second point (x, y).
-
-    Returns:
-        float: The Euclidean distance between the two points.
-    """
-    return np.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
-
-
 def warp_regions(image, box):
     """Warps a region of the image defined by a quadrilateral box.
 
@@ -868,8 +759,8 @@ def warp_regions(image, box):
         numpy.ndarray: The warped image region.
     """
     p0, p1, p2, p3 = box
-    height = int(distance(p0, p3))
-    width = int(distance(p0, p1))
+    height = int(np.linalg.norm([p0, p3], ord=2))
+    width = int(np.linalg.norm([p0, p1], ord=2))
     src_pts = np.float32([p0, p1, p3])
     dst_pts = np.float32([[0, 0], [width - 1, 0], [0, height - 1]])
     affine_matrix = cv2.getAffineTransform(src_pts, dst_pts)
@@ -963,7 +854,7 @@ def put_text(
         background_color=None,
         text_color=None,
         text_size=None,
-        chinese_font_path="resource/Songti.ttc",
+        chinese_font_path=None,
 ):
     """Adds text to an image at a specified position with optional background color.
 
@@ -974,7 +865,7 @@ def put_text(
         background_color (tuple, optional): The background color for the text. Defaults to (0, 0, 0).
         text_color (tuple or int, optional): The color of the text. Defaults to 255 for grayscale images and (255, 255, 255) for color images.
         text_size (int, optional): The size of the text. Defaults to a value based on the image dimensions.
-        chinese_font_path (str, optional): The path to the Chinese font file. Defaults to "resource/Songti.ttc".
+        chinese_font_path (str, optional): The path to the Chinese font file.
 
     Returns:
         numpy.ndarray: The image with the added text.
@@ -998,8 +889,11 @@ def put_text(
     # Convert image to contiguous array
     image = np.ascontiguousarray(image)
     if has_chinese_char:
-        img_with_text = put_text_use_pillow(image, position, text, text_size, background_color, text_color,
-                                            chinese_font_path)
+        img_with_text = put_text_use_pillow(
+            image, position, text,
+            text_size, background_color,
+            text_color, chinese_font_path
+        )
     else:
         img_with_text = put_text_using_opencv(image, position, text, text_size, background_color, text_color)
 
@@ -1092,13 +986,12 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
     Returns:
         numpy.ndarray: The image with the added text.
     """
-    text_size = max(text_size, 10)
     if osp.exists(chinese_font_path):
-        font = ImageFont.truetype(chinese_font_path, int(text_size))
+        font = ImageFont.truetype(chinese_font_path, int(max(text_size, 10)))
     else:
         chinese_font_path = fm.findfont(fm.FontProperties(family="AR PL UKai CN"))
         if osp.exists(chinese_font_path):
-            font = ImageFont.truetype(chinese_font_path, int(text_size))
+            font = ImageFont.truetype(chinese_font_path, int(max(text_size, 10)))
         else:
             print("[put_text_use_pillow]: 有中文, 但没有对应的字体.")
             font = None
@@ -1219,7 +1112,23 @@ def imwrite(file_path, image, overwrite=True):
     cv2.imwrite(file_path, image)
 
 
-# ============标签处处理==============
+# ============labelme software==============
+
+class LabelObject(object):
+    """Class representing a labeled object with various attributes."""
+
+    def __init__(self):
+        self.type = None
+        self.pts = None
+        self.ori_pts = None
+        self.pts_normed = None
+        self.label = None
+        self.box = None
+        self.height = None
+        self.width = None
+
+    def __str__(self):
+        return f"type: {self.type}, label: {self.label}"
 
 
 def create_labelme_file(png_path, content=None, overwrite=False, labelme_version="5.0.1"):
@@ -1301,9 +1210,6 @@ def create_labelme_shape(label: str, points, shape_type: str):
     }
 
 
-POLYGON_APPROX_TOLERANCE = 0.004
-
-
 def compute_polygon_from_mask(mask, debug=False):
     """Extracts polygon contours from a binary mask image.
 
@@ -1315,6 +1221,7 @@ def compute_polygon_from_mask(mask, debug=False):
         list: List of polygons, where each polygon is represented as an array of points.
     """
     import skimage.measure
+    POLYGON_APPROX_TOLERANCE = 0.004
     # Pad the mask to ensure contours are detected at the edges
     padded_mask = np.pad(mask, pad_width=1)
     contours = skimage.measure.find_contours(padded_mask, level=0.5)
@@ -1351,23 +1258,6 @@ def compute_polygon_from_mask(mask, debug=False):
         polygons.append(polygon[:, ::-1])
 
     return polygons
-
-
-class LabelObject(object):
-    """Class representing a labeled object with various attributes."""
-
-    def __init__(self):
-        self.type = None
-        self.pts = None
-        self.ori_pts = None
-        self.pts_normed = None
-        self.label = None
-        self.box = None
-        self.height = None
-        self.width = None
-
-    def __str__(self):
-        return f"type: {self.type}, label: {self.label}"
 
 
 def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
@@ -1419,7 +1309,7 @@ def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
         )
     basename = osp.basename(path).split(".")[0]
     if return_dict:
-        obj_dict = collections.defaultdict(list)
+        obj_dict = defaultdict(list)
         for obj in obj_list:
             obj_dict[obj.label].append(obj)
         return obj_dict, img, basename
@@ -1922,30 +1812,3 @@ class NormalWarp:
 
         face_image = cv2.warpPerspective(image, warp_matrix, self.roi_size)
         return face_image, rotation_matrix, warp_matrix
-
-
-# =====================deprecated==========
-
-def deprecated(func):
-    """
-    这是一个装饰器，用于标记函数为已弃用。当使用该函数时，会发出警告。
-
-    Args:
-        func (function): 被装饰的函数。
-
-    Returns:
-        function: 包装后的新函数。
-    """
-
-    @functools.wraps(func)
-    def new_func(*args, **kwargs):
-        warnings.simplefilter('always', DeprecationWarning)  # 关闭过滤器
-        warnings.warn(
-            f"调用已弃用的函数 {func.__name__}.",
-            category=DeprecationWarning,
-            stacklevel=2
-        )
-        warnings.simplefilter('default', DeprecationWarning)  # 恢复过滤器
-        return func(*args, **kwargs)
-
-    return new_func
