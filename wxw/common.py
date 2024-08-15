@@ -2,6 +2,8 @@ import argparse
 import base64
 import hashlib
 import json
+
+import torch
 import yaml
 import os
 import os.path as osp
@@ -559,6 +561,94 @@ def plt2array():
 
 
 # ===============图像处理===============
+def merge_images(img1, img2, pt1, pt2):
+    """
+    Merge two images such that the specified points in each image overlap.
+
+    Args:
+        img1 (np.ndarray): The first image.
+        img2 (np.ndarray): The second image.
+        pt1 (tuple or np.ndarray or list): The point in the first image to align.
+        pt2 (tuple or np.ndarray or list): The point in the second image to align.
+
+    Returns:
+        tuple: The merged image and an image showing the alignment.
+    """
+    # 获取图像尺寸
+    h1, w1 = img1.shape[:2]
+    x1, y1 = np.array(pt1, dtype=int).tolist()
+
+    h2, w2 = img2.shape[:2]
+    x2, y2 = np.array(pt2, dtype=int).tolist()
+
+    # 在img1上计算边界扩展
+    top = max(0, -y1)
+    left = max(0, -x1)
+    bottom = max(0, y1 - h1)
+    right = max(0, x1 - w1)
+
+    x3, y3 = x1 + left, y1 + top
+    h3, w3 = h1 + top + bottom, w1 + left + right
+    top += max(y2 - y3, 0)
+    left += max(x2 - x3, 0)
+    bottom += max((h2 - y2) - (h3 - y3), 0)
+    right += max((w2 - x2) - (w3 - x3), 0)
+    # 扩展img1的边界
+    img = cv2.copyMakeBorder(img1, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+    x4, y4 = x1 + left, y1 + top  # 在新图上的重合点
+    x5, y5 = x4 - x2, y4 - y2  # img2左上角在新图上的坐标
+    x6, y6 = x5 + w2, y5 + h2  # img2 右下角在新图的坐标
+
+    # 将img2合并到扩展后的img1中
+    img[y5:y6, x5:x6, :] = cv2.addWeighted(
+        img[y5:y6, x5:x6, :], 1,
+        img2, 1, 0
+    )
+
+    # 计算img1在结果图像中的位置
+    x7, y7 = x4 - x1, y4 - y1  # img2左上角在新图上的坐标
+    x8, y8 = x7 + w1, y7 + h1  # img2 右下角在新图的坐标
+    res = img[y7:y8, x7:x8, :]
+
+    # 创建显示对齐结果的图像
+    img_show = img.copy()
+    img_show[y5:y6, x5:x6, :] = cv2.addWeighted(
+        img_show[y5:y6, x5:x6, :], 0.5,
+        img2, 0.5, 0
+    )
+
+    cv2.circle(img_show, (x6, y6), 10, (222, 0, 0), -1)
+    cv2.circle(img_show, (x5, y5), 10, (0, 0, 222), -1)
+    cv2.circle(img_show, (x4, y4), 10, (222, 0, 0), -1)
+    cv2.rectangle(img_show, (x5, y5), (x6, y6), (0, 0, 222), 4)
+    cv2.rectangle(img_show, (x7, y7), (x8, y8), (0, 222, 222), 2)
+    # cm.imshow("img_show", img_show)
+    return res, img_show
+
+
+def print_image_info(img, name=None):
+    name = name or 'img'
+    if isinstance(img, Image.Image):
+        img = np.array(img)
+    min_, max_ = img.min(), img.max()
+    unique = np.unique(img).tolist()
+    if len(unique) < 5:
+        unique = str(unique)
+    else:
+        unique = ', '.join([f"{x}" for x in unique[:5]]) + ', ... ' + f'{max_}'
+    dtype = img.dtype
+    img_shape = img.shape
+    device = img.device if torch.is_tensor(img) else 'cpu'
+    print(
+        f"{'-' * 100}\n"
+        f"[{name}] shape is {img_shape}, "
+        f"values range is [{min_}, {max_}], "
+        f"dtype is {dtype}, "
+        f"on {device} device.\n"
+        f"unique: {unique}"
+        f"\n{'-' * 100}"
+    )
 
 
 def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), center=True, align=8):
@@ -729,10 +819,55 @@ def center_crop(image, size=np.inf):
     """
     height, width = image.shape[:2]
     side_length = min(height, width, size)
-    x_offset = int(np.ceil((width - side_length) // 2))
-    y_offset = int(np.ceil((height - side_length) // 2))
-    cropped_image = image[y_offset: y_offset + side_length, x_offset: x_offset + side_length, ...]
-    return cropped_image, x_offset, y_offset
+    x_start = int(np.ceil((width - side_length) // 2))
+    y_start = int(np.ceil((height - side_length) // 2))
+    x_end, y_end = x_start + side_length, y_start + side_length
+    cropped_image = image[y_start: y_end, x_start: x_end, ...]
+    return cropped_image, (x_start, y_start), (x_end, y_end)
+
+
+def random_crop(
+        image, aspect_ratio=1,
+        area_ratio=0.5, crop_area_range=(0, 1.0)
+):
+    """Randomly crops a region from an image with a specified aspect ratio.
+
+    Args:
+        image (numpy.ndarray): The input image from which to crop.
+        aspect_ratio (float): The desired aspect ratio (width/height) of the cropped region.
+        area_ratio (float, optional): The ratio of the crop area to the image area. Defaults to 0.5.
+        crop_area_range (tuple, optional): The range of the crop area as a fraction of the image size. Defaults to (0, 1.0).
+
+    Returns:
+        numpy.ndarray: The cropped image region.
+    """
+    img_height, img_width = image.shape[:2]
+
+    area_ratio = np.sqrt(area_ratio)
+    target_ratio = abs(crop_area_range[1] - crop_area_range[0])
+    assert len(crop_area_range) == 2
+    # Calculate the target crop height and width based on the aspect ratio
+    if aspect_ratio < 1:
+        # If the image's aspect ratio is greater than the target ratio,
+        # set the crop height to a random value and calculate the crop width
+        crop_height = int(area_ratio * img_height * target_ratio)
+        crop_width = int(crop_height * aspect_ratio)
+    else:
+        # If the image's aspect ratio is less than or equal to the target ratio,
+        # set the crop width to a random value and calculate the crop height
+        crop_width = int(area_ratio * img_width * target_ratio)
+        crop_height = int(crop_width / aspect_ratio)
+
+    # Randomly select the top-left corner of the crop region
+    x_start = np.random.randint(
+        int(img_width * min(crop_area_range)), int(img_width * max(crop_area_range)) - crop_width + 1)
+    y_start = np.random.randint(
+        int(img_height * min(crop_area_range)), int(img_height * max(crop_area_range)) - crop_height + 1)
+
+    # Crop the image
+    x_end, y_end = x_start + crop_width, y_start + crop_height
+    cropped_image = image[y_start:y_end, x_start:x_end]
+    return cropped_image, (x_start, y_start), (x_end, y_end)
 
 
 def cv_img_to_base64(image, quality=100):
@@ -1075,29 +1210,90 @@ def norm_for_show(array):
     return normalized_array
 
 
-def imshow(window_name, image, original_size=False, delay=0, exit_key=113):
+def concatenate_images(images, axis=None):
+    """
+    Concatenates a list of images into a single image.
+
+    Args:
+        images (list): List of images to concatenate. Each image should be a NumPy array.
+
+    Returns:
+        np.ndarray: Concatenated image or None if the input list is empty.
+    """
+    assert isinstance(images, list), "Input must be a list of images."
+
+    if len(images) == 0:
+        return None
+    if len(images) == 1:
+        return images[0]
+
+    height, width = images[0].shape[:2]
+    concatenated_images = []
+    if not axis:
+        axis = int(height > width)
+    for image in images:
+        if axis == 1:
+            image = size_pre_process(image, height=height, align=1)
+            axis = 1
+        else:
+            image = size_pre_process(image, width=width, align=1)
+            axis = 0
+
+        if image.ndim == 2:
+            image = np.stack([image] * 3, axis=-1)
+
+        if image.dtype != np.uint8:
+            image = norm_for_show(image)
+
+        concatenated_images.append(image)
+    try:
+        concatenated_image = np.concatenate(
+            concatenated_images, axis=axis
+        )
+    except:
+
+        for c in concatenated_images:
+            print(c.shape)
+
+    return concatenated_image
+
+
+def imshow(
+        window_name,
+        image: Union[List[np.ndarray], np.ndarray],
+        wk=True, original_size=False, delay=0,
+        exit_key=113):
     """Displays an image in a window.
 
     Args:
         window_name (str): The name of the window.
-        image (numpy.ndarray): The image to be displayed.
+        image (Union[List[np.ndarray], np.ndarray]): The image or list of images to be displayed.
+        wk (bool, optional): Whether to call waitKey. Defaults to True.
         original_size (bool, optional): Whether to display the image in its original size. Defaults to False.
         delay (int, optional): The delay in milliseconds for the waitKey function. Defaults to 0.
         exit_key (int, optional): The key code to exit the display. Defaults to 113 ('q').
 
     Returns:
-        int: The key code pressed during the display.
+        int: The key code pressed during the display, or None if waitKey is not called.
     """
+
+    if isinstance(image, list):
+        image = concatenate_images(image)
+
     if image is not None:
         if not original_size:
             height, width = image.shape[:2]
-            if height > 2048 or width > 2048:
-                image = size_pre_process(image, long=2048)
+            if width > 2048:
+                image = size_pre_process(image, width=2048)
+            if height > 1024:
+                image = size_pre_process(image, height=1024)
         cv2.imshow(window_name, image)
-    key = cv2.waitKey(delay)
-    if key == exit_key:
-        exit()
-    return key
+    if wk:
+        key = cv2.waitKey(delay)
+        if key == exit_key:
+            exit()
+        return key
+    return None
 
 
 def imwrite(file_path, image, overwrite=True):
