@@ -327,6 +327,8 @@ def generate_random_color(min_value, max_value) -> tuple:
 def create_color_list(num_colors):
     """Create a list of colors.
 
+    REF: https://matplotlib.org/stable/users/explain/colors/colormaps.html#qualitative
+
     Args:
         num_colors (int): The number of colors to generate.
 
@@ -627,31 +629,42 @@ def merge_images(img1, img2, pt1, pt2):
     return res, img_show
 
 
-def print_image_info(img, name=None):
+def image_info(img, name=None):
+    """Returns information about the image.
+
+    Args:
+        img: The image to analyze. Can be a PIL Image or a NumPy array.
+        name: Optional; the name of the image. Defaults to 'img'.
+
+    Returns:
+        A formatted string containing the image's shape, value range, dtype, device, and unique values.
+    """
     name = name or 'img'
     if isinstance(img, Image.Image):
         img = np.array(img)
-    min_, max_ = img.min(), img.max()
-    unique = np.unique(img).tolist()
-    if len(unique) < 5:
-        unique = str(unique)
-    else:
-        unique = ', '.join([f"{x}" for x in unique[:5]]) + ', ... ' + f'{max_}'
+
+    device = img.device if torch.is_tensor(img) else 'cpu'
     dtype = img.dtype
     img_shape = img.shape
-    device = img.device if torch.is_tensor(img) else 'cpu'
-    print(
-        f"{'-' * 100}\n"
+    min_val, max_val = img.min(), img.max()
+    img = img.cpu() if torch.is_tensor(img) else img
+
+    unique_values = np.unique(img).tolist()
+    unique_values_str = ', '.join([f"{x}" for x in unique_values[:5]])
+    if len(unique_values) > 5:
+        unique_values_str += ', ... ' + f'{max_val}'
+    return (
+        f"\n{'-' * 100}\n"
         f"[{name}] shape is {img_shape}, "
-        f"values range is [{min_}, {max_}], "
+        f"values range are [{min_val}, {max_val}], "
         f"dtype is {dtype}, "
         f"on {device} device.\n"
-        f"unique: {unique}"
-        f"\n{'-' * 100}"
+        f"unique: {unique_values_str}"
+        f"\n{'-' * 100}\n"
     )
 
 
-def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0), center=True, align=8):
+def pad_image(img, target=None, border_type=None, value=(0, 0, 0), center=True, align=8):
     """Pad an image to a target size.
 
     Args:
@@ -665,6 +678,7 @@ def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)
     Returns:
         tuple: The padded image, left padding, and top padding.
     """
+    border_type = border_type if border_type else cv2.BORDER_CONSTANT
     height, width = img.shape[:2]
 
     if target is None:
@@ -692,7 +706,7 @@ def pad_image(img, target=None, border_type=cv2.BORDER_CONSTANT, value=(0, 0, 0)
     else:
         img = cv2.copyMakeBorder(img, top, bottom, left, right, borderType=border_type)
 
-    return img, left, top
+    return img, (left, top), (right, bottom)
 
 
 def random_pad_image(image, target_size, border_type=cv2.BORDER_CONSTANT, border_value=(0, 0, 0)):
@@ -730,11 +744,9 @@ def random_pad_image(image, target_size, border_type=cv2.BORDER_CONSTANT, border
         image, top, bottom, left, right, borderType=border_type, value=border_value
     )
 
-    padded_image, x_offset, y_offset = pad_image(
+    return pad_image(
         padded_image, target_size, center=False, border_type=border_type, value=border_value
     )
-
-    return padded_image, left + x_offset, top + y_offset
 
 
 def size_pre_process(image, max_length=4096, **kwargs):
@@ -992,7 +1004,9 @@ def put_text(
         background_color=None,
         text_color=None,
         text_size=None,
-        chinese_font_path=None,
+        thickness=1,
+        chinese_font_path='',
+        only_use_opencv=False,
 ):
     """Adds text to an image at a specified position with optional background color.
 
@@ -1004,6 +1018,8 @@ def put_text(
         text_color (tuple or int, optional): The color of the text. Defaults to 255 for grayscale images and (255, 255, 255) for color images.
         text_size (int, optional): The size of the text. Defaults to a value based on the image dimensions.
         chinese_font_path (str, optional): The path to the Chinese font file.
+        thickness (int): The thickness of text.
+        only_use_opencv (bool, optional): In any case, use opencv, default False
 
     Returns:
         numpy.ndarray: The image with the added text.
@@ -1026,19 +1042,22 @@ def put_text(
 
     # Convert image to contiguous array
     image = np.ascontiguousarray(image)
-    if has_chinese_char:
+    if only_use_opencv or not has_chinese_char:
+        img_with_text = put_text_using_opencv(
+            image, position, text, text_size,
+            background_color, text_color, thickness
+        )
+    else:
         img_with_text = put_text_use_pillow(
             image, position, text,
             text_size, background_color,
-            text_color, chinese_font_path
+            text_color, chinese_font_path,
         )
-    else:
-        img_with_text = put_text_using_opencv(image, position, text, text_size, background_color, text_color)
 
     return img_with_text
 
 
-def put_text_using_opencv(image, position, text, text_size, background_color, text_color):
+def put_text_using_opencv(image, position, text, text_size, background_color, text_color, thickness):
     """Adds text to an image using OpenCV.
 
     Args:
@@ -1048,6 +1067,7 @@ def put_text_using_opencv(image, position, text, text_size, background_color, te
         text_size (int): The size of the text.
         background_color (tuple or int): The background color for the text.
         text_color (tuple or int): The color of the text.
+        thickness (int): The thickness of text.
 
     Returns:
         numpy.ndarray: The image with the added text.
@@ -1056,7 +1076,6 @@ def put_text_using_opencv(image, position, text, text_size, background_color, te
     height, width = image.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = text_size / 30
-    thickness = 1
 
     # Offset position
     x1, y1 = np.array(position, dtype=int)
@@ -1113,7 +1132,7 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
     """Adds text to an image using Pillow, with support for Chinese characters.
 
     Args:
-        image (numpy.ndarray): The input image to which text will be added.
+        image (numpy.ndarray, BGR): The input image to which text will be added.
         position (tuple): The (x, y) coordinates for the text position.
         text (str): The text to be added to the image.
         text_size (int): The size of the text.
@@ -1138,7 +1157,6 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
         return put_text_using_opencv(image, position, text, text_size, background_color, text_color)
 
     height, width = image.shape[:2]
-    is_gray = image.ndim == 2
 
     # Offset position
     x1, y1 = np.array(position, dtype=int)
@@ -1171,28 +1189,22 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
     x1, _ = get_offset_coordinates(x1, x2, 0, width)
     y1, _ = get_offset_coordinates(y1, y2, 0, height)
 
-    if is_gray:
-        img_pillow = Image.fromarray(image)
-    else:
-        img_pillow = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
+    img_pillow = Image.fromarray(image)
     draw = ImageDraw.Draw(img_pillow)
 
     for line, (tw, th) in zip(cur_texts, font_sizes):
         left_top_x, left_top_y = x1, y1
         right_bottom_x, right_bottom_y = x1 + tw, y1 + th
         if background_color != -1:
-            cv2.rectangle(
-                image, (left_top_x, left_top_y - 1),
-                (right_bottom_x, right_bottom_y + 1),
-                background_color, -1, cv2.LINE_AA
+            # fixme: 这里矩形框有偏移
+            draw.rectangle(
+                [left_top_x, left_top_y - 1, right_bottom_x, right_bottom_y + 1],
+                fill=background_color
             )
         draw.text((left_top_x, left_top_y), line, font=font, fill=text_color)
         x1, y1 = left_top_x, right_bottom_y + 1
 
     image = np.asarray(img_pillow)
-    if not is_gray:
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
     return image
 
@@ -2011,3 +2023,20 @@ class NormalWarp:
 
         face_image = cv2.warpPerspective(image, warp_matrix, self.roi_size)
         return face_image, rotation_matrix, warp_matrix
+
+
+if __name__ == '__main__':
+    color_names = [
+        "Blue", "Orange", "Green", "Red", "Purple", "Brown",
+        "Pink", "Gray", "Olive", "Cyan", "Light Blue", "Light Orange", "Light Green",
+        "Light Red", "Light Purple", "Light Brown", "Light Pink", "Light Gray", "Light Olive",
+        "Light Cyan"
+    ]
+    print(len(color_names), len(plt.cm.tab10.colors))
+    for name, value in zip(color_names, plt.cm.tab20.colors):
+        value = tuple((np.array(value) * 255).astype(int).tolist())[::-1]
+        print(f"'{name}':{value},")
+    img = np.zeros((320, 320, 3), dtype=np.uint8)
+    img = put_text(img, "你好", (160, 160), (0, 0, 222), (0, 222, 0))
+    # imshow('img', img)
+    print(image_info(img))
