@@ -563,7 +563,7 @@ def plt2array():
 
 
 # ===============图像处理===============
-def merge_images(img1, img2, pt1, pt2):
+def merge_images(img1, img2, pt1, pt2, faster=True, debug=False):
     """
     Merge two images such that the specified points in each image overlap.
 
@@ -572,6 +572,8 @@ def merge_images(img1, img2, pt1, pt2):
         img2 (np.ndarray): The second image.
         pt1 (tuple or np.ndarray or list): The point in the first image to align.
         pt2 (tuple or np.ndarray or list): The point in the second image to align.
+        faster (bool, optional): Whether process on img1, if False, first padding img1. default True.
+        debug (bool,  optional): Whether draw debug-text on image. default False.
 
     Returns:
         tuple: The merged image and an image showing the alignment.
@@ -595,37 +597,73 @@ def merge_images(img1, img2, pt1, pt2):
     left += max(x2 - x3, 0)
     bottom += max((h2 - y2) - (h3 - y3), 0)
     right += max((w2 - x2) - (w3 - x3), 0)
-    # 扩展img1的边界
-    img = cv2.copyMakeBorder(img1, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
 
     x4, y4 = x1 + left, y1 + top  # 在新图上的重合点
     x5, y5 = x4 - x2, y4 - y2  # img2左上角在新图上的坐标
     x6, y6 = x5 + w2, y5 + h2  # img2 右下角在新图的坐标
 
-    # 将img2合并到扩展后的img1中
-    img[y5:y6, x5:x6, :] = cv2.addWeighted(
-        img[y5:y6, x5:x6, :], 1,
-        img2, 1, 0
-    )
-
     # 计算img1在结果图像中的位置
     x7, y7 = x4 - x1, y4 - y1  # img2左上角在新图上的坐标
     x8, y8 = x7 + w1, y7 + h1  # img2 右下角在新图的坐标
-    res = img[y7:y8, x7:x8, :]
 
-    # 创建显示对齐结果的图像
-    img_show = img.copy()
-    img_show[y5:y6, x5:x6, :] = cv2.addWeighted(
-        img_show[y5:y6, x5:x6, :], 0.5,
-        img2, 0.5, 0
-    )
+    # 计算iou面积
+    union_x1 = max(x5, x7)
+    union_y1 = max(y5, y7)
 
-    cv2.circle(img_show, (x6, y6), 10, (222, 0, 0), -1)
-    cv2.circle(img_show, (x5, y5), 10, (0, 0, 222), -1)
-    cv2.circle(img_show, (x4, y4), 10, (222, 0, 0), -1)
-    cv2.rectangle(img_show, (x5, y5), (x6, y6), (0, 0, 222), 4)
-    cv2.rectangle(img_show, (x7, y7), (x8, y8), (0, 222, 222), 2)
-    # cm.imshow("img_show", img_show)
+    union_x2 = min(x6, x8)
+    union_y2 = min(y6, y8)
+    union_h, union_w = union_y2 - union_y1, union_x2 - union_x1
+
+    if faster:
+        img_show = res = img1.copy()
+        if union_h > 0 and union_w > 0:
+            im1x1 = union_x1 - x7
+            im1y1 = union_y1 - y7
+
+            im1x2 = union_x2 - x7
+            im1y2 = union_y2 - y7
+
+            im2x1 = union_x1 - x5
+            im2y1 = union_y1 - y5
+
+            im2x2 = union_x2 - x5
+            im2y2 = union_y2 - y5
+            res[im1y1:im1y2, im1x1:im1x2, :] = cv2.addWeighted(
+                res[im1y1:im1y2, im1x1:im1x2, :], 1,
+                img2[im2y1:im2y2, im2x1:im2x2, :], 1, 0
+            )
+    else:
+        # 扩展img1的边界
+        img = cv2.copyMakeBorder(img1, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+        # 将img2合并到扩展后的img1中
+        img[y5:y6, x5:x6, :] = cv2.addWeighted(
+            img[y5:y6, x5:x6, :], 1,
+            img2, 1, 0
+        )
+        res = img[y7:y8, x7:x8, :]
+
+        img_show = img.copy()
+        if debug:
+            # 创建显示对齐结果的图像
+            img_show[y5:y6, x5:x6, :] = cv2.addWeighted(
+                img_show[y5:y6, x5:x6, :], 0.5,
+                img2, 0.5, 0
+            )
+
+            cv2.circle(img_show, (x6, y6), 10, (222, 0, 0), -1)
+            cv2.circle(img_show, (x5, y5), 10, (0, 0, 222), -1)
+            cv2.circle(img_show, (x4, y4), 10, (222, 0, 0), -1)
+            cv2.rectangle(img_show, (x5, y5), (x6, y6), (0, 0, 222), 4)
+            img_show = cm.put_text(img_show, '(x5, y5)', (x5, y5), text_color=(0, 0, 222))
+            img_show = cm.put_text(img_show, '(x6, y6)', (x6, y6), text_color=(0, 0, 222))
+
+            cv2.rectangle(img_show, (x7, y7), (x8, y8), (0, 222, 222), 2)
+            img_show = cm.put_text(img_show, '(x7, y7)', (x7, y7), text_color=(0, 222, 222))
+            img_show = cm.put_text(img_show, '(x8, y8)', (x8, y8), text_color=(0, 222, 222))
+
+            if faster:
+                cv2.rectangle(img_show, (union_x1, union_y1), (union_x2, union_y2), (0, 222, 0), 1)
+            cm.imshow('img1', [img1, res, img_show])
     return res, img_show
 
 
