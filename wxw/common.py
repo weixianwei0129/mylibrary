@@ -28,6 +28,13 @@ random.seed(123456)
 
 
 # =============基础方法===============
+def softmax_np(x, dim=0):
+    # 减去最大值以提高数值稳定性
+    x_max = np.max(x, axis=dim, keepdims=True)
+    e_x = np.exp(x - x_max)
+    return e_x / np.sum(e_x, axis=dim, keepdims=True)
+
+
 def print_red(text):
     """Print text in red color."""
     print(f"\033[31m{text}\033[0m")
@@ -410,6 +417,7 @@ def merge_path(path, flag, ignore=None):
     Returns:
         str: The merged path starting from the flag.
     """
+    assert isinstance(path, str)
     if ignore is None:
         ignore = []
     path_parts = path.split(os.sep)
@@ -468,6 +476,7 @@ def move_file_pair(
                 dst_name = dst_name[:-postfix_length]
                 break
 
+    execute_srcs = []
     for postfix in postfixes:
         src = osp.join(src_dir, src_name + postfix)
 
@@ -477,21 +486,28 @@ def move_file_pair(
 
         if osp.exists(src):
             dst = osp.join(dst_folder, dst_name + postfix)
-            if not execute:
-                print(f"[move_file_pair]: {src} -> {dst}")
-            else:
-                if overwrite and osp.exists(dst):
-                    os.remove(dst)
-                if not osp.exists(dst):
-                    os.makedirs(dst_folder, exist_ok=True)
-                    try:
-                        if copy:
-                            shutil.copy(src, dst)
-                        else:
-                            shutil.move(src, dst)
-                    except Exception as e:
-                        if not ignore_failed:
-                            raise Exception(e)
+            execute_srcs.append([src, dst])
+
+    if len(execute_srcs) != len(postfixes):
+        print(f"warning: [{path}]缺少配对文件")
+        return
+
+    for src, dst in execute_srcs:
+        if not execute:
+            print(f"[move_file_pair]: {src} -> {dst}")
+        else:
+            if overwrite and osp.exists(dst):
+                os.remove(dst)
+            if not osp.exists(dst):
+                os.makedirs(dst_folder, exist_ok=True)
+                try:
+                    if copy:
+                        shutil.copy(src, dst)
+                    else:
+                        shutil.move(src, dst)
+                except Exception as e:
+                    if not ignore_failed:
+                        raise Exception(e)
 
 
 def save_txt_jpg(path, image, content):
@@ -1354,6 +1370,9 @@ def imwrite(file_path, image, overwrite=True):
         image (numpy.ndarray): The image to be saved.
         overwrite (bool, optional): Whether to overwrite the file if it exists. Defaults to True.
     """
+    if not file_path:
+        print("Write failed! file_path is ", file_path)
+        return
     if not overwrite and osp.exists(file_path):
         print(f"{file_path} already exists!")
         return
