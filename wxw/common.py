@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 
+import einops
 import torch
 import yaml
 import os
@@ -403,6 +404,64 @@ def simplify_number(decimal):
     fraction_string = f"{fraction.numerator}/{fraction.denominator}"
 
     return fraction_string, fraction.numerator, fraction.denominator
+
+
+class ControlKey:
+    """Class to handle control keys for video playback."""
+
+    def __init__(self, exponential=True):
+        """
+        Initialize the ControlKey instance.
+
+        Args:
+            exponential (bool): Whether to use exponential growth for speeds.
+        """
+        self.momentum_factor = 1.1
+        self.exponential = exponential
+        self.reset()
+
+    def reset(self):
+        """Reset the control key states."""
+        self.forward_speed = 1
+        self.rewind_speed = 1
+        self.wk = 1
+
+    def change(self, key, index):
+        """
+        Change the index based on the key pressed.
+
+        Args:
+            key (int): The Unicode code of the key pressed.
+            index (int): The current index.
+
+        Returns:
+            int: The updated index.
+        """
+        if key == 27:  # ESC key
+            exit()
+        if key in [ord('q'), ord('Q')]:
+            index += np.inf
+            self.reset()
+        elif key in [ord('f'), ord('F')]:
+            self.rewind_speed = 1
+            if self.exponential:
+                self.forward_speed *= self.momentum_factor
+            index += int(self.forward_speed)
+        elif key in [ord('r'), ord('R')]:
+            self.forward_speed = 1
+            if self.exponential:
+                self.rewind_speed *= self.momentum_factor
+            index -= int(self.rewind_speed)
+            if index < 0:
+                self.rewind_speed = 2
+                index = 0
+        else:
+            index += 1
+
+        if key == ord('\r'):  # Enter key
+            self.reset()
+            self.wk = 1 - self.wk
+        return index
 
 
 # =========Files: 文件移动和写入============
@@ -1139,7 +1198,7 @@ def put_text_using_opencv(image, position, text, text_size, background_color, te
     cur_texts = []
     (char_width, char_height), baseline = cv2.getTextSize('1234567890gj', font, font_scale, thickness)
     char_height = int(char_height + baseline)
-    char_width = int(char_width / 12)
+    char_width = int(char_width / 12 + 2)
 
     for line in texts:
         cur_text = [line]
@@ -1230,6 +1289,7 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
                 text_width, text_height = right - left, bottom - top
             else:
                 text_width, text_height = font.getsize(line)
+            text_width += 2
             if text_width > width and len(line) > 1:
                 mid = max(int(width / (text_width / len(line))), 1)
                 cur_text.append(line[mid:])
@@ -1274,6 +1334,31 @@ def norm_for_show(array):
     """
     normalized_array = ((array - np.min(array)) / (np.max(array) - np.min(array)) * 255).astype(np.uint8)
     return normalized_array
+
+
+def create_image_grid(images, nrow=None, ncol=None):
+    assert len(images) > 0
+    total = len(images)
+    if nrow is None and ncol is None:
+        nrow = int(np.ceil(np.sqrt(total)))
+    if nrow is None:
+        nrow = int(np.ceil(total / ncol))
+    if ncol is None:
+        ncol = int(np.ceil(total / nrow))
+    height = max(x.shape[0] for x in images)
+    width = max(x.shape[1] for x in images)
+    side = max(height, width)
+    ret_imgs = []
+    for img in images:
+        img = size_pre_process(img, long=side, align=1)
+        img = pad_image(img, align=1)[0]
+        if img.ndim == 2:
+            img = np.stack([img] * 3, axis=-1)
+        ret_imgs.append(img)
+    ret_imgs += [np.zeros_like(ret_imgs[0])] * (nrow * ncol - total)
+    ret_imgs = np.stack(ret_imgs, axis=0)
+    ret_imgs = einops.rearrange(ret_imgs, "(r c) h w ch -> (r h) (c w) ch", r=nrow)
+    return ret_imgs
 
 
 def concatenate_images(images, axis=None):
@@ -1327,8 +1412,9 @@ def concatenate_images(images, axis=None):
 def imshow(
         window_name,
         image: Union[List[np.ndarray], np.ndarray],
-        wk=True, original_size=False, delay=0,
-        exit_key=113):
+        wk=True, original_size=False, delay: int = 0,
+        exit_key: str = '\x1b'
+):
     """Displays an image in a window.
 
     Args:
@@ -1337,12 +1423,11 @@ def imshow(
         wk (bool, optional): Whether to call waitKey. Defaults to True.
         original_size (bool, optional): Whether to display the image in its original size. Defaults to False.
         delay (int, optional): The delay in milliseconds for the waitKey function. Defaults to 0.
-        exit_key (int, optional): The key code to exit the display. Defaults to 113 ('q').
+        exit_key (str, optional): The key code to exit the display. Defaults to 'ESC'.
 
     Returns:
         int: The key code pressed during the display, or None if waitKey is not called.
     """
-
     if isinstance(image, list):
         image = concatenate_images(image)
 
@@ -1356,7 +1441,7 @@ def imshow(
         cv2.imshow(window_name, image)
     if wk:
         key = cv2.waitKey(delay)
-        if key == exit_key:
+        if key == ord(exit_key):
             exit()
         return key
     return None
