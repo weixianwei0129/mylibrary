@@ -729,16 +729,16 @@ def merge_images(img1, img2, pt1, pt2, faster=True, debug=False):
             cv2.circle(img_show, (x5, y5), 10, (0, 0, 222), -1)
             cv2.circle(img_show, (x4, y4), 10, (222, 0, 0), -1)
             cv2.rectangle(img_show, (x5, y5), (x6, y6), (0, 0, 222), 4)
-            img_show = cm.put_text(img_show, '(x5, y5)', (x5, y5), text_color=(0, 0, 222))
-            img_show = cm.put_text(img_show, '(x6, y6)', (x6, y6), text_color=(0, 0, 222))
+            img_show = put_text(img_show, '(x5, y5)', (x5, y5), text_color=(0, 0, 222))
+            img_show = put_text(img_show, '(x6, y6)', (x6, y6), text_color=(0, 0, 222))
 
             cv2.rectangle(img_show, (x7, y7), (x8, y8), (0, 222, 222), 2)
-            img_show = cm.put_text(img_show, '(x7, y7)', (x7, y7), text_color=(0, 222, 222))
-            img_show = cm.put_text(img_show, '(x8, y8)', (x8, y8), text_color=(0, 222, 222))
+            img_show = put_text(img_show, '(x7, y7)', (x7, y7), text_color=(0, 222, 222))
+            img_show = put_text(img_show, '(x8, y8)', (x8, y8), text_color=(0, 222, 222))
 
             if faster:
                 cv2.rectangle(img_show, (union_x1, union_y1), (union_x2, union_y2), (0, 222, 0), 1)
-            cm.imshow('img1', [img1, res, img_show])
+            imshow('img1', [img1, res, img_show])
     return res, img_show
 
 
