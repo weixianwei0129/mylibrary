@@ -12,6 +12,7 @@ import random
 import shutil
 import time
 import cv2
+import psutil
 from functools import partial
 from functools import wraps
 from collections import defaultdict
@@ -26,14 +27,46 @@ from PIL import __version__ as pl_version
 # Set random seeds for reproducibility
 np.random.seed(123456)
 random.seed(123456)
+MB_UNIT = 1 << 20
+GB_UNIT = 1 << 30
 
 
 # =============基础方法===============
+def memory_info():
+    # 获取虚拟内存信息
+    ram_usage = psutil.virtual_memory()
+    total = ram_usage.total / GB_UNIT
+    available = ram_usage.available / GB_UNIT
+    usage = ram_usage.used / GB_UNIT
+    percent = ram_usage.percent
+    string = (
+        f"total: {ram_usage.total / GB_UNIT:.2f} GB,"
+        f"available: {ram_usage.available / GB_UNIT:.2f} GB,"
+        f"used: {ram_usage.used / GB_UNIT:.2f} GB({ram_usage.percent}%)."
+    )
+    return total, available, usage, percent, string
+
+
 def softmax_np(x, dim=0):
     # 减去最大值以提高数值稳定性
     x_max = np.max(x, axis=dim, keepdims=True)
     e_x = np.exp(x - x_max)
     return e_x / np.sum(e_x, axis=dim, keepdims=True)
+
+
+def highlight_text(text, color='red'):
+    if color == 'red':
+        return f"\033[31m{text}\033[0m"
+    elif color == 'green':
+        return f"\033[32m{text}\033[0m"
+    elif color == 'blue':
+        return f"\033[34m{text}\033[0m"
+    elif color == 'yellow':
+        return f"\033[33m{text}\033[0m"
+    elif color == 'purple':
+        return f"\033[35m{text}\033[0m"
+    else:
+        return text  # Default behavior if color is not recognized
 
 
 def print_red(text):
@@ -407,61 +440,101 @@ def simplify_number(decimal):
 
 
 class ControlKey:
-    """Class to handle control keys for video playback."""
+    """Handles control keys for video playback."""
 
-    def __init__(self, exponential=True):
+    def __init__(self, **kwargs):
         """
-        Initialize the ControlKey instance.
+        Initializes the ControlKey instance.
 
         Args:
-            exponential (bool): Whether to use exponential growth for speeds.
+            **kwargs: Arbitrary keyword arguments.
+                - momentum (float): Factor for momentum, default is 1.0.
+                - ignore_case (bool): Whether to ignore case for key matching, default is True.
         """
-        self.momentum_factor = 1.1
-        self.exponential = exponential
+        self.kwargs = kwargs
+        self.momentum = max(self.kwargs.get('momentum', 1.0), 1.0)
+        self.ignore_case = self.kwargs.get('ignore_case', True)
+        self.delay = self.kwargs.get('delay', 1)
         self.reset()
 
-    def reset(self):
-        """Reset the control key states."""
-        self.forward_speed = 1
-        self.rewind_speed = 1
-        self.wk = 1
+        self._pause = self.match_case('pause', '\r')
+        self._forward = self.match_case('forward', 'f')
+        self._rewind = self.match_case('rewind', 'b')
+        self._skip = self.match_case('skip', 'q')
+        self._exit = self.match_case('exit', '\x1b')
+        self._reset = self.match_case('reset', 'r')
+        if self.has_duplicates():
+            raise ValueError("Duplicate keys detected.")
 
-    def change(self, key, index):
+    def has_duplicates(self):
+        """Checks for duplicate keys.
+
+        Returns:
+            bool: True if there are duplicate keys, False otherwise.
         """
-        Change the index based on the key pressed.
+        lst = self._pause + self._forward + self._rewind + self._exit + self._skip + self._reset
+        return len(lst) != len(set(lst))
+
+    def match_case(self, name, default):
+        """Matches keys with case sensitivity based on settings.
+
+        Args:
+            name (str): The name of the key.
+            default (str): The default key value.
+
+        Returns:
+            list: List of Unicode values for the matched keys.
+        """
+        values = ''.join(self.kwargs.get(name, default))
+        if self.ignore_case:
+            values = list(set(values.upper() + values.lower()))
+        values = [ord(x) for x in values]
+        return values
+
+    def reset(self):
+        """Resets the control key states."""
+        self.forward_speed = 1
+        self.rewind_speed = 2
+        self.wk = self.delay
+
+    def change(self, key):
+        """
+        Changes the index based on the key pressed.
 
         Args:
             key (int): The Unicode code of the key pressed.
-            index (int): The current index.
 
         Returns:
             int: The updated index.
         """
-        if key == 27:  # ESC key
+        if key == self._exit:  # ESC key
             exit()
-        if key in [ord('q'), ord('Q')]:
-            index += np.inf
-            self.reset()
-        elif key in [ord('f'), ord('F')]:
-            self.rewind_speed = 1
-            if self.exponential:
-                self.forward_speed *= self.momentum_factor
-            index += int(self.forward_speed)
-        elif key in [ord('r'), ord('R')]:
-            self.forward_speed = 1
-            if self.exponential:
-                self.rewind_speed *= self.momentum_factor
-            index -= int(self.rewind_speed)
-            if index < 0:
-                self.rewind_speed = 2
-                index = 0
-        else:
-            index += 1
 
-        if key == ord('\r'):  # Enter key
+        value = 0
+
+        if key in self._skip:
             self.reset()
-            self.wk = 1 - self.wk
-        return index
+            value = float('inf')
+        elif key in self._reset:
+            self.reset()
+            value = -float('inf')
+        elif key in self._forward:
+            self.rewind_speed = 2
+            self.forward_speed *= self.momentum
+            value = int(self.forward_speed)
+        elif key in self._rewind:
+            self.forward_speed = 1
+            self.rewind_speed *= self.momentum
+            value = -int(self.rewind_speed)
+
+        if key in self._pause:
+            self.forward_speed = 1
+            self.rewind_speed = 2
+            if self.wk != 0:
+                self.wk = 0
+            else:
+                self.wk = self.delay
+        return value
 
 
 # =========Files: 文件移动和写入============
@@ -512,7 +585,7 @@ def move_file_pair(
         delete_empty_file (bool, optional): Whether to delete the file if it is empty. Defaults to False.
         ignore_failed (bool, optional): Whether to ignore the options that failed to move or copy. Defaults to False.
         overwrite (bool, optional): Whether to overwrite the file if it exists. Defaults to True.
-        
+
 
     Returns:
         None
@@ -738,7 +811,7 @@ def merge_images(img1, img2, pt1, pt2, faster=True, debug=False):
 
             if faster:
                 cv2.rectangle(img_show, (union_x1, union_y1), (union_x2, union_y2), (0, 222, 0), 1)
-            imshow('img1', [img1, res, img_show])
+            # imshow('img1', [img1, res, img_show])
     return res, img_show
 
 
@@ -1337,28 +1410,69 @@ def norm_for_show(array):
 
 
 def create_image_grid(images, nrow=None, ncol=None):
-    assert len(images) > 0
+    """Creates a grid of images with optional padding and resizing.
+
+    Args:
+        images (list): List of images as NumPy arrays.
+        nrow (int, optional): Number of rows in the grid. Defaults to None.
+        ncol (int, optional): Number of columns in the grid. Defaults to None.
+
+    Returns:
+        np.ndarray: The final image grid.
+    """
+    assert len(images) > 0, "The images list should not be empty."
+
     total = len(images)
+
+    # Calculate the number of rows and columns if not provided
     if nrow is None and ncol is None:
         nrow = int(np.ceil(np.sqrt(total)))
     if nrow is None:
         nrow = int(np.ceil(total / ncol))
     if ncol is None:
         ncol = int(np.ceil(total / nrow))
-    height = max(x.shape[0] for x in images)
-    width = max(x.shape[1] for x in images)
-    side = max(height, width)
-    ret_imgs = []
-    for img in images:
-        img = size_pre_process(img, long=side, align=1)
-        img = pad_image(img, align=1)[0]
-        if img.ndim == 2:
-            img = np.stack([img] * 3, axis=-1)
-        ret_imgs.append(img)
-    ret_imgs += [np.zeros_like(ret_imgs[0])] * (nrow * ncol - total)
-    ret_imgs = np.stack(ret_imgs, axis=0)
-    ret_imgs = einops.rearrange(ret_imgs, "(r c) h w ch -> (r h) (c w) ch", r=nrow)
-    return ret_imgs
+
+    # Sort images by aspect ratio (height/width)
+    images.sort(key=lambda x: x.shape[0] / x.shape[1])
+
+    # Add padding to each image
+    images = [
+        cv2.copyMakeBorder(
+            x, 10, 10, 10, 10,
+            borderType=cv2.BORDER_CONSTANT, value=(222, 222, 222)
+        ) for x in images
+    ]
+
+    # Group images into rows
+    images = [images[i:i + ncol] for i in range(0, len(images), ncol)]
+
+    # Resize images in each row to have the same height
+    images = [
+        [
+            size_pre_process(xx, height=x[0].shape[0]) for xx in x
+        ] for x in images
+    ]
+
+    # Concatenate the first row of images horizontally
+    img1 = np.concatenate(images.pop(0), axis=1)
+
+    # Concatenate remaining rows vertically
+    while images:
+        h1, w1 = img1.shape[:2]
+        img2 = images.pop(0)
+        img2_number = len(img2)
+        img2 = np.concatenate(img2, axis=1)
+        h2, w2 = img2.shape[:2]
+
+        # Resize img2 to match the width of img1
+        if img2_number < ncol:
+            img2 = size_pre_process(img2, height=int(h2 / (h1 + h2) * w1))
+        else:
+            img2 = size_pre_process(img2, width=w1)
+
+        # Merge img1 and img2 vertically
+        _, img1 = merge_images(img1, img2, (0, h1), (0, 0), faster=False)
+    return img1
 
 
 def concatenate_images(images, axis=None):
@@ -2165,20 +2279,3 @@ class NormalWarp:
 
         face_image = cv2.warpPerspective(image, warp_matrix, self.roi_size)
         return face_image, rotation_matrix, warp_matrix
-
-
-if __name__ == '__main__':
-    color_names = [
-        "Blue", "Orange", "Green", "Red", "Purple", "Brown",
-        "Pink", "Gray", "Olive", "Cyan", "Light Blue", "Light Orange", "Light Green",
-        "Light Red", "Light Purple", "Light Brown", "Light Pink", "Light Gray", "Light Olive",
-        "Light Cyan"
-    ]
-    print(len(color_names), len(plt.cm.tab10.colors))
-    for name, value in zip(color_names, plt.cm.tab20.colors):
-        value = tuple((np.array(value) * 255).astype(int).tolist())[::-1]
-        print(f"'{name}':{value},")
-    img = np.zeros((320, 320, 3), dtype=np.uint8)
-    img = put_text(img, "你好", (160, 160), (0, 0, 222), (0, 222, 0))
-    # imshow('img', img)
-    print(image_info(img))

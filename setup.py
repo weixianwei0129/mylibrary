@@ -1,16 +1,16 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='wxw',  # 库的名称
-    version='1.0.0',  # 版本号
+    name='wxw',
+    version='1.0.1',
     keywords=['pip', 'wxw'],
-    description='A library for wxw',  # 简要描述
+    description='A library for wxw',
     long_description="Includes some ways to work with pictures, add qt utils",
-    author='weixianwei',  # 作者名字
-    author_email='weixianwei0129@gmail.com',  # 作者邮箱
-    url='https://github.com/weixianwei0129/mylibrary',  # 项目的URL
+    author='weixianwei',
+    author_email='weixianwei0129@gmail.com',
+    url='https://github.com/weixianwei0129/mylibrary',
 
-    packages=find_packages(),  # 需要打包的目录列表
+    packages=find_packages(),
     platforms="any",
-    install_requires=["numpy<2.0.0", "opencv-python", "matplotlib", "Pillow", "einops"]  # 这个项目依赖的第三方库
+    install_requires=["numpy<2.0.0", "opencv-python", "matplotlib", "Pillow", "einops"]
 )
