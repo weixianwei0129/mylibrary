@@ -40,9 +40,9 @@ def memory_info():
     usage = ram_usage.used / GB_UNIT
     percent = ram_usage.percent
     string = (
-        f"total: {ram_usage.total / GB_UNIT:.2f} GB,"
-        f"available: {ram_usage.available / GB_UNIT:.2f} GB,"
-        f"used: {ram_usage.used / GB_UNIT:.2f} GB({ram_usage.percent}%)."
+        f"total:{ram_usage.total / GB_UNIT:.2f} GB,"
+        f"available:{ram_usage.available / GB_UNIT:.2f} GB,"
+        f"used:{ram_usage.used / GB_UNIT:.2f} GB({ram_usage.percent}%)."
     )
     return total, available, usage, percent, string
 
@@ -94,19 +94,19 @@ def print_format(string: str, a: float, func: str, b: float) -> float:
     Format and print a mathematical operation, then return the result.
 
     Args:
-        string (str): The description of the operation.
-        a (float): The first operand.
-        func (str): The operator as a string (e.g., '+', '-', '*', '/').
-        b (float): The second operand.
+        string (str):The description of the operation.
+        a (float):The first operand.
+        func (str):The operator as a string (e.g., '+', '-', '*', '/').
+        b (float):The second operand.
 
     Returns:
-        float: The result of the operation.
+        float:The result of the operation.
     """
     formatted_string = f"{a:<5.3f} {func} {b:<5.3f}"
     if func == '/':
         b += 1e-4  # Avoid division by zero
     c = eval(f"{a} {func} {b}")
-    print(f"{string:<20}: {formatted_string} = {c:.3f}")
+    print(f"{string:<20}:{formatted_string} = {c:.3f}")
     return c
 
 
@@ -115,11 +115,11 @@ def update_args(old_, new_) -> argparse.Namespace:
     Update the arguments from old_ with new_.
 
     Args:
-        old_ (Union[argparse.Namespace, str, dict]): The original arguments.
-        new_ (Union[argparse.Namespace, str, dict]): The new arguments to update with.
+        old_ (Union[argparse.Namespace, str, dict]):The original arguments.
+        new_ (Union[argparse.Namespace, str, dict]):The new arguments to update with.
 
     Returns:
-        argparse.Namespace: The updated arguments as a Namespace object.
+        argparse.Namespace:The updated arguments as a Namespace object.
     """
     if isinstance(old_, argparse.Namespace):
         old_ = vars(old_)
@@ -143,12 +143,12 @@ def safe_replace(src: str, _old: Union[str, List[str]], _new: Union[str, List[st
     Safely replace occurrences of _old with _new in src.
 
     Args:
-        src (str): The source string.
-        _old (list or str): The substring to be replaced.
-        _new (list or str): The substring to replace with.
+        src (str):The source string.
+        _old (list or str):The substring to be replaced.
+        _new (list or str):The substring to replace with.
 
     Returns:
-        str: The modified string, or None if no replacement was made.
+        str:The modified string, or None if no replacement was made.
     """
     if isinstance(_old, str):
         _old = [_old]
@@ -158,8 +158,7 @@ def safe_replace(src: str, _old: Union[str, List[str]], _new: Union[str, List[st
     for _o, _n in zip(_old, _new):
         dst = src.replace(_o, _n)
     if dst == src:
-        print("No replacement made!")
-        return None
+        raise ValueError("No replacement made!")
     return dst
 
 
@@ -168,10 +167,10 @@ def md5sum(file_path: str) -> str:
     Calculate the MD5 checksum of a file.
 
     Args:
-        file_path (str): The path to the file.
+        file_path (str):The path to the file.
 
     Returns:
-        str: The MD5 checksum of the file.
+        str:The MD5 checksum of the file.
     """
     with open(file_path, "rb") as file:
         md5_hash = hashlib.md5()
@@ -185,14 +184,14 @@ def md5sum(file_path: str) -> str:
 
 def divisibility(a: float, r: int = 32) -> int:
     """
-    计算a是否能被r整除，如果不能则返回大于a的最小r的倍数。
+    计算a是否能被r整除,如果不能则返回大于a的最小r的倍数.
 
     Args:
-        a (float): 要检查的数字。
-        r (int, optional): 用于整除的基数，默认为32。
+        a (float):要检查的数字.
+        r (int, optional):用于整除的基数,默认为32.
 
     Returns:
-        int: 大于或等于a的最小r的倍数。
+        int:大于或等于a的最小r的倍数.
     """
     if r == 1:
         return int(a)
@@ -205,18 +204,18 @@ def get_offset_coordinates(start_point, end_point, min_value: float, max_value: 
     If the length of the line segment is greater than the range, a warning is printed and the original points are returned.
 
     Args:
-        start_point (float): The initial start point of the line segment.
-        end_point (float): The initial end point of the line segment.
-        min_value (float): The minimum allowable value.
-        max_value (float): The maximum allowable value.
+        start_point (float):The initial start point of the line segment.
+        end_point (float):The initial end point of the line segment.
+        min_value (float):The minimum allowable value.
+        max_value (float):The maximum allowable value.
 
     Returns:
-        tuple: The adjusted start and end points of the line segment.
+        tuple:The adjusted start and end points of the line segment.
     """
     if end_point - start_point > max_value - min_value:
         print(
-            f"[get_offset_coordinates] warning: "
-            f"end_point - start_point > max_value - min_value: "
+            f"[get_offset_coordinates] warning:"
+            f"end_point - start_point > max_value - min_value:"
             f"{end_point - start_point} > {max_value - min_value}"
         )
         return start_point, end_point
@@ -236,10 +235,10 @@ def cost_time(func):
     Decorator that measures the execution time of a function.
 
     Args:
-        func (function): The function to be decorated.
+        func (function):The function to be decorated.
 
     Returns:
-        function: The wrapped function with execution time measurement.
+        function:The wrapped function with execution time measurement.
     """
 
     @wraps(func)
@@ -247,7 +246,7 @@ def cost_time(func):
         start_time = time.perf_counter()
         result = func(*args, **kwargs)
         elapsed_time = (time.perf_counter() - start_time) * 1000
-        print(f"[INFO] [{func.__name__}] cost time: {elapsed_time:.4f}ms")
+        print(f"[INFO] [{func.__name__}] cost time:{elapsed_time:.4f}ms")
         return result
 
     return wrapper
@@ -258,10 +257,10 @@ def xywh2xyxy(pts):
     Convert bounding boxes from (center x, center y, width, height) format to (x1, y1, x2, y2) format.
 
     Args:
-        pts (np.ndarray or list): Array of bounding boxes in (cx, cy, w, h) format.
+        pts (np.ndarray or list):Array of bounding boxes in (cx, cy, w, h) format.
 
     Returns:
-        np.ndarray: Array of bounding boxes in (x1, y1, x2, y2) format.
+        np.ndarray:Array of bounding boxes in (x1, y1, x2, y2) format.
     """
     pts = np.reshape(pts, [-1, 4])
     cx, cy, w, h = np.split(pts, 4, 1)
@@ -279,10 +278,10 @@ def xyxy2xywh(pts):
     Convert bounding boxes from (x1, y1, x2, y2) format to (center x, center y, width, height) format.
 
     Args:
-        pts (np.ndarray or list): Array of bounding boxes in (x1, y1, x2, y2) format.
+        pts (np.ndarray or list):Array of bounding boxes in (x1, y1, x2, y2) format.
 
     Returns:
-        np.ndarray: Array of bounding boxes in (cx, cy, w, h) format.
+        np.ndarray:Array of bounding boxes in (cx, cy, w, h) format.
     """
     pts = np.reshape(pts, [-1, 4])
     x1, y1, x2, y2 = np.split(pts, 4, 1)
@@ -292,7 +291,7 @@ def xyxy2xywh(pts):
     h = np.abs(y1 - y2)
     res = np.concatenate([cx, cy, w, h], axis=1)
     res = np.clip(res, 0, np.inf)
-    return np.squeeze(res)
+    return res
 
 
 def get_min_rect(pts):
@@ -300,10 +299,10 @@ def get_min_rect(pts):
     Get the minimum bounding rectangle for a set of points.
 
     Args:
-        pts (np.ndarray or list): Array of points with shape (N, 2).
+        pts (np.ndarray or list):Array of points with shape (N, 2).
 
     Returns:
-        np.ndarray: Array containing [x_min, y_min, x_max, y_max, cx, cy, w, h].
+        np.ndarray:Array containing [x_min, y_min, x_max, y_max, cx, cy, w, h].
     """
     pts = np.reshape(pts, (-1, 2))
     x_min = min(pts[:, 0])
@@ -322,10 +321,10 @@ def clockwise_points(pts):
     Sort points in clockwise order.
 
     Args:
-        pts (list): List of points in the format [[x1, y1], [x2, y2], [x3, y3], [x4, y4]].
+        pts (list):List of points in the format [[x1, y1], [x2, y2], [x3, y3], [x4, y4]].
 
     Returns:
-        list: List of points sorted in clockwise order.
+        list:List of points sorted in clockwise order.
 
     1. 先按照x进行排序,从小到大
     2. 对前两个点,y大的为点4, 小的为点1
@@ -353,11 +352,11 @@ def generate_random_color(min_value, max_value) -> tuple:
     """Generate a random color.
 
     Args:
-        min_value (int): The minimum value for the color components.
-        max_value (int): The maximum value for the color components.
+        min_value (int):The minimum value for the color components.
+        max_value (int):The maximum value for the color components.
 
     Returns:
-        tuple: A tuple containing three integers representing the blue, green, and red components of the color.
+        tuple:A tuple containing three integers representing the blue, green, and red components of the color.
     """
     blue = np.random.randint(min_value, max_value)
     green = np.random.randint(min_value, max_value)
@@ -368,13 +367,13 @@ def generate_random_color(min_value, max_value) -> tuple:
 def create_color_list(num_colors):
     """Create a list of colors.
 
-    REF: https://matplotlib.org/stable/users/explain/colors/colormaps.html#qualitative
+    REF:https://matplotlib.org/stable/users/explain/colors/colormaps.html#qualitative
 
     Args:
-        num_colors (int): The number of colors to generate.
+        num_colors (int):The number of colors to generate.
 
     Returns:
-        np.ndarray: An array of RGB color values.
+        np.ndarray:An array of RGB color values.
     """
     if num_colors < 10:
         colors = np.array(plt.cm.tab10.colors)
@@ -390,9 +389,9 @@ def multi_process(process_method, data_to_process, num_threads=1):
     """Run a method in multiple processes.
 
     Args:
-        process_method (function): The method to be run in multiple processes.
-        data_to_process (list): The data to be processed.
-        num_threads (int, optional): The number of threads to use. Defaults to 1.
+        process_method (function):The method to be run in multiple processes.
+        data_to_process (list):The data to be processed.
+        num_threads (int, optional):The number of threads to use. Defaults to 1.
 
     Example:
         def process_method(args):
@@ -423,10 +422,10 @@ def simplify_number(decimal):
     """Convert a decimal number to its simplest fraction form.
 
     Args:
-        decimal (float): The decimal number to be converted.
+        decimal (float):The decimal number to be converted.
 
     Returns:
-        tuple: A tuple containing the fraction as a string, the numerator, and the denominator.
+        tuple:A tuple containing the fraction as a string, the numerator, and the denominator.
     """
     from fractions import Fraction
 
@@ -447,9 +446,9 @@ class ControlKey:
         Initializes the ControlKey instance.
 
         Args:
-            **kwargs: Arbitrary keyword arguments.
-                - momentum (float): Factor for momentum, default is 1.0.
-                - ignore_case (bool): Whether to ignore case for key matching, default is True.
+            **kwargs:Arbitrary keyword arguments.
+                - momentum (float):Factor for momentum, default is 1.0.
+                - ignore_case (bool):Whether to ignore case for key matching, default is True.
         """
         self.kwargs = kwargs
         self.momentum = max(self.kwargs.get('momentum', 1.0), 1.0)
@@ -470,7 +469,7 @@ class ControlKey:
         """Checks for duplicate keys.
 
         Returns:
-            bool: True if there are duplicate keys, False otherwise.
+            bool:True if there are duplicate keys, False otherwise.
         """
         lst = self._pause + self._forward + self._rewind + self._exit + self._skip + self._reset
         return len(lst) != len(set(lst))
@@ -479,11 +478,11 @@ class ControlKey:
         """Matches keys with case sensitivity based on settings.
 
         Args:
-            name (str): The name of the key.
-            default (str): The default key value.
+            name (str):The name of the key.
+            default (str):The default key value.
 
         Returns:
-            list: List of Unicode values for the matched keys.
+            list:List of Unicode values for the matched keys.
         """
         values = ''.join(self.kwargs.get(name, default))
         if self.ignore_case:
@@ -497,15 +496,15 @@ class ControlKey:
         self.rewind_speed = 2
         self.wk = self.delay
 
-    def change(self, key):
+    def __call__(self, key):
         """
         Changes the index based on the key pressed.
 
         Args:
-            key (int): The Unicode code of the key pressed.
+            key (int):The Unicode code of the key pressed.
 
         Returns:
-            int: The updated index.
+            int:The updated index.
         """
         if key == self._exit:  # ESC key
             exit()
@@ -514,10 +513,10 @@ class ControlKey:
 
         if key in self._skip:
             self.reset()
-            value = float('inf')
+            value = 1e10
         elif key in self._reset:
             self.reset()
-            value = -float('inf')
+            value = -1e10
         elif key in self._forward:
             self.rewind_speed = 2
             self.forward_speed *= self.momentum
@@ -534,20 +533,23 @@ class ControlKey:
                 self.wk = 0
             else:
                 self.wk = self.delay
-        return value
+        return int(value)
+
+    def update_idx(self, idx, key):
+        return max(0, idx + self(key))
 
 
-# =========Files: 文件移动和写入============
+# =========Files:文件移动和写入============
 def merge_path(path, flag, ignore=None):
     """Merge a path from a specific flag.
 
     Args:
-        path (str): The original path.
-        flag (str): The flag to start merging from.
-        ignore (list): Ignore parts
+        path (str):The original path.
+        flag (str):The flag to start merging from.
+        ignore (list):Ignore parts
 
     Returns:
-        str: The merged path starting from the flag.
+        str:The merged path starting from the flag.
     """
     assert isinstance(path, str)
     if ignore is None:
@@ -575,22 +577,22 @@ def move_file_pair(
     """Move or copy file pairs to a destination folder.
 
     Args:
-        path (str): The source file path.
-        dst_folder (str): The destination folder.
-        dst_name (str, optional): The destination file name without postfix. Defaults to None.
-        postfixes (list, optional): List of postfixes to consider. Defaults to None.
-        copy (bool, optional): Whether to copy instead of move. Defaults to True.
-        execute (bool, optional): Whether to execute the move/copy. Defaults to False.
-        move_empty_file (bool, optional): Whether to move if the file is empty. Defaults to True.
-        delete_empty_file (bool, optional): Whether to delete the file if it is empty. Defaults to False.
-        ignore_failed (bool, optional): Whether to ignore the options that failed to move or copy. Defaults to False.
-        overwrite (bool, optional): Whether to overwrite the file if it exists. Defaults to True.
+        path (str):The source file path.
+        dst_folder (str):The destination folder.
+        dst_name (str, optional):The destination file name without postfix. Defaults to None.
+        postfixes (list, optional):List of postfixes to consider. Defaults to None.
+        copy (bool, optional):Whether to copy instead of move. Defaults to True.
+        execute (bool, optional):Whether to execute the move/copy. Defaults to False.
+        move_empty_file (bool, optional):Whether to move if the file is empty. Defaults to True.
+        delete_empty_file (bool, optional):Whether to delete the file if it is empty. Defaults to False.
+        ignore_failed (bool, optional):Whether to ignore the options that failed to move or copy. Defaults to False.
+        overwrite (bool, optional):Whether to overwrite the file if it exists. Defaults to True.
 
 
     Returns:
         None
     """
-    # NOTE: 'self_postfix' will be the last part after splitting by '.'
+    # NOTE:'self_postfix' will be the last part after splitting by '.'
     prefix, self_postfix = osp.splitext(path)
     if postfixes is None:
         postfixes = [self_postfix]
@@ -621,12 +623,12 @@ def move_file_pair(
             execute_srcs.append([src, dst])
 
     if len(execute_srcs) != len(postfixes):
-        print(f"warning: [{path}]缺少配对文件")
+        print(f"warning:[{path}]缺少配对文件")
         return
 
     for src, dst in execute_srcs:
         if not execute:
-            print(f"[move_file_pair]: {src} -> {dst}")
+            print(f"[move_file_pair]:{src} -> {dst}")
         else:
             if overwrite and osp.exists(dst):
                 os.remove(dst)
@@ -646,12 +648,12 @@ def save_txt_jpg(path, image, content):
     """Save an image as a .png file and optionally save content as a .txt file.
 
     Args:
-        path (str): The base file path.
-        image (np.ndarray): The image to be saved.
-        content (str, optional): The content to be written to a text file. Defaults to None.
+        path (str):The base file path.
+        image (np.ndarray):The image to be saved.
+        content (str, optional):The content to be written to a text file. Defaults to None.
 
     Returns:
-        tuple: A tuple containing the paths to the saved image and text file.
+        tuple:A tuple containing the paths to the saved image and text file.
     """
     # Determine the file extension
     file_extension = osp.splitext(path)[-1]
@@ -683,7 +685,7 @@ def plt2array():
     """Convert a Matplotlib plot to a NumPy array.
 
     Returns:
-        np.ndarray: The RGBA image as a NumPy array.
+        np.ndarray:The RGBA image as a NumPy array.
     """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     # Convert the Matplotlib plot to a NumPy array
@@ -716,15 +718,15 @@ def merge_images(img1, img2, pt1, pt2, faster=True, debug=False):
     Merge two images such that the specified points in each image overlap.
 
     Args:
-        img1 (np.ndarray): The first image.
-        img2 (np.ndarray): The second image.
-        pt1 (tuple or np.ndarray or list): The point in the first image to align.
-        pt2 (tuple or np.ndarray or list): The point in the second image to align.
-        faster (bool, optional): Whether process on img1, if False, first padding img1. default True.
-        debug (bool,  optional): Whether draw debug-text on image. default False.
+        img1 (np.ndarray):The first image.
+        img2 (np.ndarray):The second image.
+        pt1 (tuple or np.ndarray or list):The point in the first image to align.
+        pt2 (tuple or np.ndarray or list):The point in the second image to align.
+        faster (bool, optional):Whether process on img1, if False, first padding img1. default True.
+        debug (bool,  optional):Whether draw debug-text on image. default False.
 
     Returns:
-        tuple: The merged image and an image showing the alignment.
+        tuple:The merged image and an image showing the alignment.
     """
     # 获取图像尺寸
     h1, w1 = img1.shape[:2]
@@ -819,8 +821,8 @@ def image_info(img, name=None):
     """Returns information about the image.
 
     Args:
-        img: The image to analyze. Can be a PIL Image or a NumPy array.
-        name: Optional; the name of the image. Defaults to 'img'.
+        img:The image to analyze. Can be a PIL Image or a NumPy array.
+        name:Optional; the name of the image. Defaults to 'img'.
 
     Returns:
         A formatted string containing the image's shape, value range, dtype, device, and unique values.
@@ -845,7 +847,7 @@ def image_info(img, name=None):
         f"values range are [{min_val}, {max_val}], "
         f"dtype is {dtype}, "
         f"on {device} device.\n"
-        f"unique: {unique_values_str}"
+        f"unique:{unique_values_str}"
         f"\n{'-' * 100}\n"
     )
 
@@ -854,15 +856,15 @@ def pad_image(img, target=None, border_type=None, value=(0, 0, 0), center=True, 
     """Pad an image to a target size.
 
     Args:
-        img (np.ndarray): The input image.
-        target (tuple or int, optional): The target size. If not provided, the shorter side is padded to match the longer side.
-        border_type (int, optional): The border type to use. Defaults to cv2.BORDER_CONSTANT.
-        value (tuple, optional): The border color value. Defaults to (0, 0, 0).
-        center (bool, optional): Whether to center the image. Defaults to True.
-        align (int, optional): Alignment value for divisibility. Defaults to 8.
+        img (np.ndarray):The input image.
+        target (tuple or int, optional):The target size. If not provided, the shorter side is padded to match the longer side.
+        border_type (int, optional):The border type to use. Defaults to cv2.BORDER_CONSTANT.
+        value (tuple, optional):The border color value. Defaults to (0, 0, 0).
+        center (bool, optional):Whether to center the image. Defaults to True.
+        align (int, optional):Alignment value for divisibility. Defaults to 8.
 
     Returns:
-        tuple: The padded image, left padding, and top padding.
+        tuple:The padded image, left padding, and top padding.
     """
     border_type = border_type if border_type else cv2.BORDER_CONSTANT
     height, width = img.shape[:2]
@@ -874,8 +876,9 @@ def pad_image(img, target=None, border_type=None, value=(0, 0, 0), center=True, 
             target_height = target_width = target
         else:
             target_width, target_height = target
-            assert target_width >= width, f"pad value too small: {[width, height]} -> {target}"
-            assert target_height >= height, f"pad value too small: {[width, height]} -> {target}"
+
+    if target_width < width: print(f"width pad value too small:{width} -> {target_width}")
+    if target_height < height: print(f"height pad value too small:{height} -> {target_height}")
 
     target_height, target_width = (divisibility(x, r=align) for x in [target_height, target_width])
 
@@ -899,14 +902,14 @@ def random_pad_image(image, target_size, border_type=cv2.BORDER_CONSTANT, border
     """Randomly pads an image to the target size.
 
     Args:
-        image (numpy.ndarray): The input image to be padded.
-        target_size (int or tuple): The target size for padding. If an integer is provided, both width and height will
+        image (numpy.ndarray):The input image to be padded.
+        target_size (int or tuple):The target size for padding. If an integer is provided, both width and height will
         be set to this value. If a tuple is provided, it should be in the form (width, height).
-        border_type (int, optional): Border type to be used for padding. Defaults to cv2.BORDER_CONSTANT.
-        border_value (tuple, optional): Border color value for padding. Defaults to (0, 0, 0).
+        border_type (int, optional):Border type to be used for padding. Defaults to cv2.BORDER_CONSTANT.
+        border_value (tuple, optional):Border color value for padding. Defaults to (0, 0, 0).
 
     Returns:
-        tuple: The padded image and the x, y coordinates of the top-left corner of the original image within the padded image.
+        tuple:The padded image and the x, y coordinates of the top-left corner of the original image within the padded image.
     """
     height, width = image.shape[:2]
 
@@ -939,19 +942,19 @@ def size_pre_process(image, max_length=4096, **kwargs):
     """Pre-processes the size of an image based on various criteria.
 
     Args:
-        image (numpy.ndarray): The input image to be resized.
-        max_length (int, optional): The maximum allowed length for width or height. Defaults to 4096.
-        **kwargs: Additional keyword arguments for resizing criteria.
-            - interpolation (int, optional): Interpolation method for resizing. Defaults to None.
-            - align (int, optional): Alignment value for divisibility. Defaults to 32.
-            - hard (int or tuple, optional): Hard target size for resizing.
-            - short (int, optional): Target size for the shorter dimension.
-            - long (int, optional): Target size for the longer dimension.
-            - height (int, optional): Target height for resizing.
-            - width (int, optional): Target width for resizing.
+        image (numpy.ndarray):The input image to be resized.
+        max_length (int, optional):The maximum allowed length for width or height. Defaults to 4096.
+        **kwargs:Additional keyword arguments for resizing criteria.
+            - interpolation (int, optional):Interpolation method for resizing. Defaults to None.
+            - align (int, optional):Alignment value for divisibility. Defaults to 32.
+            - hard (int or tuple, optional):Hard target size for resizing.
+            - short (int, optional):Target size for the shorter dimension.
+            - long (int, optional):Target size for the longer dimension.
+            - height (int, optional):Target height for resizing.
+            - width (int, optional):Target width for resizing.
 
     Returns:
-        numpy.ndarray: The resized image.
+        numpy.ndarray:The resized image.
     """
     align_function = partial(divisibility, r=kwargs.get('align', 32))
     height, width = image.shape[:2]
@@ -1009,18 +1012,18 @@ def center_crop(image, size=np.inf):
     """Crops the center of the image to create a square image.
 
     Args:
-        image (numpy.ndarray): The input image to be cropped.
-        size (int, optional): size of cropped. default inf
+        image (numpy.ndarray):The input image to be cropped.
+        size (int, optional):size of cropped. default inf
 
     Returns:
-        tuple: The cropped image and the x, y coordinates of the top-left corner of the cropped area.
+        tuple:The cropped image and the x, y coordinates of the top-left corner of the cropped area.
     """
     height, width = image.shape[:2]
     side_length = min(height, width, size)
     x_start = int(np.ceil((width - side_length) // 2))
     y_start = int(np.ceil((height - side_length) // 2))
     x_end, y_end = x_start + side_length, y_start + side_length
-    cropped_image = image[y_start: y_end, x_start: x_end, ...]
+    cropped_image = image[y_start:y_end, x_start:x_end, ...]
     return cropped_image, (x_start, y_start), (x_end, y_end)
 
 
@@ -1031,13 +1034,13 @@ def random_crop(
     """Randomly crops a region from an image with a specified aspect ratio.
 
     Args:
-        image (numpy.ndarray): The input image from which to crop.
-        aspect_ratio (float): The desired aspect ratio (width/height) of the cropped region.
-        area_ratio (float, optional): The ratio of the crop area to the image area. Defaults to 0.5.
-        crop_area_range (tuple, optional): The range of the crop area as a fraction of the image size. Defaults to (0, 1.0).
+        image (numpy.ndarray):The input image from which to crop.
+        aspect_ratio (float):The desired aspect ratio (width/height) of the cropped region.
+        area_ratio (float, optional):The ratio of the crop area to the image area. Defaults to 0.5.
+        crop_area_range (tuple, optional):The range of the crop area as a fraction of the image size. Defaults to (0, 1.0).
 
     Returns:
-        numpy.ndarray: The cropped image region.
+        numpy.ndarray:The cropped image region.
     """
     img_height, img_width = image.shape[:2]
 
@@ -1072,11 +1075,11 @@ def cv_img_to_base64(image, quality=100):
     """Converts an OpenCV image to a base64 encoded string.
 
     Args:
-        image (numpy.ndarray): The input image to be converted.
-        quality (int, optional): The quality of the JPEG encoding. Defaults to 100.
+        image (numpy.ndarray):The input image to be converted.
+        quality (int, optional):The quality of the JPEG encoding. Defaults to 100.
 
     Returns:
-        str: The base64 encoded string of the image.
+        str:The base64 encoded string of the image.
     """
     img_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
     _, encoded_img = cv2.imencode(".jpg", image, img_params)
@@ -1088,11 +1091,11 @@ def warp_regions(image, box):
     """Warps a region of the image defined by a quadrilateral box.
 
     Args:
-        image (numpy.ndarray): The input image to be warped.
-        box (list): A list of four points defining the quadrilateral (p0, p1, p2, p3).
+        image (numpy.ndarray):The input image to be warped.
+        box (list):A list of four points defining the quadrilateral (p0, p1, p2, p3).
 
     Returns:
-        numpy.ndarray: The warped image region.
+        numpy.ndarray:The warped image region.
     """
     p0, p1, p2, p3 = box
     height = int(np.linalg.norm([p0, p3], ord=2))
@@ -1108,14 +1111,14 @@ def rotate_image(image, angle, center_point=None, scale=1.0, border_mode=cv2.BOR
     """Rotates an image counterclockwise by a specified angle.
 
     Args:
-        image (numpy.ndarray): The input image to be rotated.
-        angle (float): The angle by which to rotate the image counterclockwise.
-        center_point (tuple, optional): The point around which to rotate the image. Defaults to the center of the image.
-        scale (float, optional): The scaling factor. Defaults to 1.0.
-        border_mode (int, optional): Pixel extrapolation method. Defaults to cv2.BORDER_REPLICATE.
+        image (numpy.ndarray):The input image to be rotated.
+        angle (float):The angle by which to rotate the image counterclockwise.
+        center_point (tuple, optional):The point around which to rotate the image. Defaults to the center of the image.
+        scale (float, optional):The scaling factor. Defaults to 1.0.
+        border_mode (int, optional):Pixel extrapolation method. Defaults to cv2.BORDER_REPLICATE.
 
     Returns:
-        numpy.ndarray: The rotated image.
+        numpy.ndarray:The rotated image.
     """
     height, width = image.shape[:2]
     if center_point is None:
@@ -1129,11 +1132,11 @@ def rotate_location(angle, rect):
     """Rotates the coordinates of a rectangle by a given angle.
 
     Args:
-        angle (float): The angle by which to rotate the rectangle, in degrees.
-        rect (tuple): A tuple (x, y, width, height) representing the rectangle.
+        angle (float):The angle by which to rotate the rectangle, in degrees.
+        rect (tuple):A tuple (x, y, width, height) representing the rectangle.
 
     Returns:
-        list: A list of tuples representing the new coordinates of the rectangle's corners.
+        list:A list of tuples representing the new coordinates of the rectangle's corners.
     """
     angle_radians = -angle * np.pi / 180.0
     cos_angle = np.cos(angle_radians)
@@ -1172,10 +1175,10 @@ def has_chinese(text):
     """Checks if a string contains any Chinese characters.
 
     Args:
-        text (str): The input string to be checked.
+        text (str):The input string to be checked.
 
     Returns:
-        bool: True if the string contains Chinese characters, False otherwise.
+        bool:True if the string contains Chinese characters, False otherwise.
     """
     for char in text:
         if "\u4e00" <= char <= "\u9fff":
@@ -1197,18 +1200,18 @@ def put_text(
     """Adds text to an image at a specified position with optional background color.
 
     Args:
-        image (numpy.ndarray): The input image to which text will be added.
-        text (str): The text to be added to the image.
-        position (tuple, optional): The (x, y) coordinates for the text position. Defaults to (0, 0).
-        background_color (tuple, optional): The background color for the text. Defaults to (0, 0, 0).
-        text_color (tuple or int, optional): The color of the text. Defaults to 255 for grayscale images and (255, 255, 255) for color images.
-        text_size (int, optional): The size of the text. Defaults to a value based on the image dimensions.
-        chinese_font_path (str, optional): The path to the Chinese font file.
-        thickness (int): The thickness of text.
-        only_use_opencv (bool, optional): In any case, use opencv, default False
+        image (numpy.ndarray):The input image to which text will be added.
+        text (str):The text to be added to the image.
+        position (tuple, optional):The (x, y) coordinates for the text position. Defaults to (0, 0).
+        background_color (tuple, optional):The background color for the text. Defaults to (0, 0, 0).
+        text_color (tuple or int, optional):The color of the text. Defaults to 255 for grayscale images and (255, 255, 255) for color images.
+        text_size (int, optional):The size of the text. Defaults to a value based on the image dimensions.
+        chinese_font_path (str, optional):The path to the Chinese font file.
+        thickness (int):The thickness of text.
+        only_use_opencv (bool, optional):In any case, use opencv, default False
 
     Returns:
-        numpy.ndarray: The image with the added text.
+        numpy.ndarray:The image with the added text.
     """
     text = str(text)
     is_gray = image.ndim == 2
@@ -1247,16 +1250,16 @@ def put_text_using_opencv(image, position, text, text_size, background_color, te
     """Adds text to an image using OpenCV.
 
     Args:
-        image (numpy.ndarray): The input image to which text will be added.
-        position (tuple): The (x, y) coordinates for the text position.
-        text (str): The text to be added to the image.
-        text_size (int): The size of the text.
-        background_color (tuple or int): The background color for the text.
-        text_color (tuple or int): The color of the text.
-        thickness (int): The thickness of text.
+        image (numpy.ndarray):The input image to which text will be added.
+        position (tuple):The (x, y) coordinates for the text position.
+        text (str):The text to be added to the image.
+        text_size (int):The size of the text.
+        background_color (tuple or int):The background color for the text.
+        text_color (tuple or int):The color of the text.
+        thickness (int):The thickness of text.
 
     Returns:
-        numpy.ndarray: The image with the added text.
+        numpy.ndarray:The image with the added text.
     """
     image = np.ascontiguousarray(image)
     height, width = image.shape[:2]
@@ -1304,7 +1307,7 @@ def put_text_using_opencv(image, position, text, text_size, background_color, te
                     background_color, -1, cv2.LINE_AA
                 )
             except Exception as e:
-                print(f"[put_text_using_opencv]: {e}, coordinates: {(left_x - 1, top_y), (right_x + 1, bottom_y)}")
+                print(f"[put_text_using_opencv]:{e}, coordinates:{(left_x - 1, top_y), (right_x + 1, bottom_y)}")
         cv2.putText(
             image, line, (left_x, bottom_y - baseline),
             font, font_scale, text_color, thickness
@@ -1318,16 +1321,16 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
     """Adds text to an image using Pillow, with support for Chinese characters.
 
     Args:
-        image (numpy.ndarray, BGR): The input image to which text will be added.
-        position (tuple): The (x, y) coordinates for the text position.
-        text (str): The text to be added to the image.
-        text_size (int): The size of the text.
-        background_color (tuple or int): The background color for the text.
-        text_color (tuple or int): The color of the text.
-        chinese_font_path (str): The path to the Chinese font file.
+        image (numpy.ndarray, BGR):The input image to which text will be added.
+        position (tuple):The (x, y) coordinates for the text position.
+        text (str):The text to be added to the image.
+        text_size (int):The size of the text.
+        background_color (tuple or int):The background color for the text.
+        text_color (tuple or int):The color of the text.
+        chinese_font_path (str):The path to the Chinese font file.
 
     Returns:
-        numpy.ndarray: The image with the added text.
+        numpy.ndarray:The image with the added text.
     """
     if osp.exists(chinese_font_path):
         font = ImageFont.truetype(chinese_font_path, int(max(text_size, 10)))
@@ -1336,7 +1339,7 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
         if osp.exists(chinese_font_path):
             font = ImageFont.truetype(chinese_font_path, int(max(text_size, 10)))
         else:
-            print("[put_text_use_pillow]: 有中文, 但没有对应的字体.")
+            print("[put_text_use_pillow]:有中文, 但没有对应的字体.")
             font = None
 
     if font is None:
@@ -1383,7 +1386,7 @@ def put_text_use_pillow(image, position, text, text_size, background_color, text
         left_top_x, left_top_y = x1, y1
         right_bottom_x, right_bottom_y = x1 + tw, y1 + th
         if background_color != -1:
-            # fixme: 这里矩形框有偏移
+            # fixme:这里矩形框有偏移
             draw.rectangle(
                 [left_top_x, left_top_y - 1, right_bottom_x, right_bottom_y + 1],
                 fill=background_color
@@ -1400,10 +1403,10 @@ def norm_for_show(array):
     """Normalizes an array for display purposes.
 
     Args:
-        array (numpy.ndarray): The input array to be normalized.
+        array (numpy.ndarray):The input array to be normalized.
 
     Returns:
-        numpy.ndarray: The normalized array, scaled to the range [0, 255] and converted to uint8.
+        numpy.ndarray:The normalized array, scaled to the range [0, 255] and converted to uint8.
     """
     normalized_array = ((array - np.min(array)) / (np.max(array) - np.min(array)) * 255).astype(np.uint8)
     return normalized_array
@@ -1413,12 +1416,12 @@ def create_image_grid(images, nrow=None, ncol=None):
     """Creates a grid of images with optional padding and resizing.
 
     Args:
-        images (list): List of images as NumPy arrays.
-        nrow (int, optional): Number of rows in the grid. Defaults to None.
-        ncol (int, optional): Number of columns in the grid. Defaults to None.
+        images (list):List of images as NumPy arrays.
+        nrow (int, optional):Number of rows in the grid. Defaults to None.
+        ncol (int, optional):Number of columns in the grid. Defaults to None.
 
     Returns:
-        np.ndarray: The final image grid.
+        np.ndarray:The final image grid.
     """
     assert len(images) > 0, "The images list should not be empty."
 
@@ -1480,10 +1483,10 @@ def concatenate_images(images, axis=None):
     Concatenates a list of images into a single image.
 
     Args:
-        images (list): List of images to concatenate. Each image should be a NumPy array.
+        images (list):List of images to concatenate. Each image should be a NumPy array.
 
     Returns:
-        np.ndarray: Concatenated image or None if the input list is empty.
+        np.ndarray:Concatenated image or None if the input list is empty.
     """
     assert isinstance(images, list), "Input must be a list of images."
 
@@ -1532,15 +1535,15 @@ def imshow(
     """Displays an image in a window.
 
     Args:
-        window_name (str): The name of the window.
-        image (Union[List[np.ndarray], np.ndarray]): The image or list of images to be displayed.
-        wk (bool, optional): Whether to call waitKey. Defaults to True.
-        original_size (bool, optional): Whether to display the image in its original size. Defaults to False.
-        delay (int, optional): The delay in milliseconds for the waitKey function. Defaults to 0.
-        exit_key (str, optional): The key code to exit the display. Defaults to 'ESC'.
+        window_name (str):The name of the window.
+        image (Union[List[np.ndarray], np.ndarray]):The image or list of images to be displayed.
+        wk (bool, optional):Whether to call waitKey. Defaults to True.
+        original_size (bool, optional):Whether to display the image in its original size. Defaults to False.
+        delay (int, optional):The delay in milliseconds for the waitKey function. Defaults to 0.
+        exit_key (str, optional):The key code to exit the display. Defaults to 'ESC'.
 
     Returns:
-        int: The key code pressed during the display, or None if waitKey is not called.
+        int:The key code pressed during the display, or None if waitKey is not called.
     """
     if isinstance(image, list):
         image = concatenate_images(image)
@@ -1548,10 +1551,11 @@ def imshow(
     if image is not None:
         if not original_size:
             height, width = image.shape[:2]
-            if width > 2048:
+            if width > height and width > 2048:
                 image = size_pre_process(image, width=2048)
             if height > 1024:
                 image = size_pre_process(image, height=1024)
+
         cv2.imshow(window_name, image)
     if wk:
         key = cv2.waitKey(delay)
@@ -1565,9 +1569,9 @@ def imwrite(file_path, image, overwrite=True):
     """Writes an image to a file.
 
     Args:
-        file_path (str): The path to save the image.
-        image (numpy.ndarray): The image to be saved.
-        overwrite (bool, optional): Whether to overwrite the file if it exists. Defaults to True.
+        file_path (str):The path to save the image.
+        image (numpy.ndarray):The image to be saved.
+        overwrite (bool, optional):Whether to overwrite the file if it exists. Defaults to True.
     """
     if not file_path:
         print("Write failed! file_path is ", file_path)
@@ -1595,17 +1599,17 @@ class LabelObject(object):
         self.width = None
 
     def __str__(self):
-        return f"type: {self.type}, label: {self.label}"
+        return f"type:{self.type}, label:{self.label}"
 
 
 def create_labelme_file(png_path, content=None, overwrite=False, labelme_version="5.0.1"):
     """Creates a LabelMe JSON file for the given PNG image.
 
     Args:
-        png_path (str): Path to the PNG image file.
-        content (dict, optional): Content to be written to the JSON file. Defaults to None.
-        overwrite (bool, optional): Whether to overwrite the existing JSON file. Defaults to False.
-        labelme_version (str, optional): Version of LabelMe. Defaults to "5.0.1".
+        png_path (str):Path to the PNG image file.
+        content (dict, optional):Content to be written to the JSON file. Defaults to None.
+        overwrite (bool, optional):Whether to overwrite the existing JSON file. Defaults to False.
+        labelme_version (str, optional):Version of LabelMe. Defaults to "5.0.1".
     """
     json_path = osp.splitext(png_path)[0] + '.json'
     if osp.exists(json_path) and not overwrite:
@@ -1626,13 +1630,13 @@ def create_labelme_content(img, png_path, shapes=None, labelme_version="5.0.1"):
     """Creates the content dictionary for a LabelMe JSON file.
 
     Args:
-        img (numpy.ndarray or None): Image data. If None, the image will be read from png_path.
-        png_path (str): Path to the PNG image file.
-        shapes (list, optional): List of shapes to be included in the JSON file. Defaults to an empty list.
-        labelme_version (str, optional): Version of LabelMe. Defaults to "5.0.1".
+        img (numpy.ndarray or None):Image data. If None, the image will be read from png_path.
+        png_path (str):Path to the PNG image file.
+        shapes (list, optional):List of shapes to be included in the JSON file. Defaults to an empty list.
+        labelme_version (str, optional):Version of LabelMe. Defaults to "5.0.1".
 
     Returns:
-        dict: Content dictionary for the LabelMe JSON file.
+        dict:Content dictionary for the LabelMe JSON file.
     """
     if shapes is None:
         shapes = []
@@ -1660,12 +1664,12 @@ def create_labelme_shape(label: str, points, shape_type: str):
     """Creates a shape dictionary for a LabelMe JSON file.
 
     Args:
-        label (str): Label for the shape.
-        points (list): List of points defining the shape.
-        shape_type (str): Type of the shape (e.g., "rectangle", "polygon").
+        label (str):Label for the shape.
+        points (list):List of points defining the shape.
+        shape_type (str):Type of the shape (e.g., "rectangle", "polygon").
 
     Returns:
-        dict: Shape dictionary for the LabelMe JSON file.
+        dict:Shape dictionary for the LabelMe JSON file.
     """
     points = np.reshape(points, [-1, 2]).squeeze().tolist()
     return {
@@ -1677,15 +1681,26 @@ def create_labelme_shape(label: str, points, shape_type: str):
     }
 
 
+def update_labelme_shape_label(js, convert):
+    info = json.load(open(js, 'r'))
+    shapes = info.get('shapes', [])
+    for i in range(len(shapes)):
+        label = shapes[i]['label']
+        if label in convert:
+            shapes[i]['label'] = convert[label]
+    info['shapes'] = shapes
+    json.dump(info, open(js, 'w'))
+
+
 def compute_polygon_from_mask(mask, debug=False):
     """Extracts polygon contours from a binary mask image.
 
     Args:
-        mask (numpy.ndarray): Binary mask image with values 0 or 1.
-        debug (bool, optional): Whether to visualization. Defaults to False.
+        mask (numpy.ndarray):Binary mask image with values 0 or 1.
+        debug (bool, optional):Whether to visualization. Defaults to False.
 
     Returns:
-        list: List of polygons, where each polygon is represented as an array of points.
+        list:List of polygons, where each polygon is represented as an array of points.
     """
     import skimage.measure
     POLYGON_APPROX_TOLERANCE = 0.004
@@ -1731,12 +1746,12 @@ def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
     """Parses a JSON file and extracts image and shape information.
 
     Args:
-        path (str): Path to the JSON file.
-        polygon (bool): Whether to convert points to polygon format.
-        return_dict (bool, optional): Whether to return a dictionary of objects. Defaults to False.
+        path (str):Path to the JSON file.
+        polygon (bool):Whether to convert points to polygon format.
+        return_dict (bool, optional):Whether to return a dictionary of objects. Defaults to False.
 
     Returns:
-        tuple: A tuple containing a list or dictionary of LabelObject instances, the image, and the basename.
+        tuple:A tuple containing a list or dictionary of LabelObject instances, the image, and the basename.
     """
     assert path.endswith('.json')
     info = json.load(open(path, "r"))
@@ -1787,20 +1802,20 @@ def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, th
     """Displays YOLO labels on an image.
 
     Args:
-        img (numpy.ndarray): The image on which to display the labels.
-        lines (list): List of label lines, each containing class index and bounding box coordinates.
-        xywh (bool, optional): Whether the bounding box coordinates are in (x, y, width, height) format. Defaults to True.
-        classes (dict, optional): Dictionary mapping class indices to class names. Defaults to None.
-        colors (list, optional): List of colors for each class. Defaults to None.
-        thickness (int, optional): Thickness of the bounding box lines. Defaults to 2.
+        img (numpy.ndarray):The image on which to display the labels.
+        lines (list):List of label lines, each containing class index and bounding box coordinates.
+        xywh (bool, optional):Whether the bounding box coordinates are in (x, y, width, height) format. Defaults to True.
+        classes (dict, optional):Dictionary mapping class indices to class names. Defaults to None.
+        colors (list, optional):List of colors for each class. Defaults to None.
+        thickness (int, optional):Thickness of the bounding box lines. Defaults to 2.
 
     Returns:
-        tuple: The image with labels and a list of points.
+        tuple:The image with labels and a list of points.
     """
     if classes is None:
         classes = {i: i for i in range(10)}
     if colors is None:
-        colors = create_color_list(len(classes))
+        colors = create_color_list(len(classes))[1:]
     mask = np.zeros_like(img)
     height, width = img.shape[:2]
     pts = []
@@ -1833,21 +1848,22 @@ def show_yolo_file(jpg_path, xywh=True, classes=None, colors=None, thickness=2):
     """Displays YOLO labels on an image from a file.
 
     Args:
-        jpg_path (str): Path to the JPEG image file.
-        xywh (bool, optional): Whether the bounding box coordinates are in (x, y, width, height) format. Defaults to True.
-        classes (dict, optional): Dictionary mapping class indices to class names. Defaults to None.
-        colors (list, optional): List of colors for each class. Defaults to None.
-        thickness (int, optional): Thickness of the bounding box lines. Defaults to 2.
+        jpg_path (str):Path to the JPEG image file.
+        xywh (bool, optional):Whether the bounding box coordinates are in (x, y, width, height) format. Defaults to True.
+        classes (dict, optional):Dictionary mapping class indices to class names. Defaults to None.
+        colors (list, optional):List of colors for each class. Defaults to None.
+        thickness (int, optional):Thickness of the bounding box lines. Defaults to 2.
 
     Returns:
-        tuple: The image with labels and a list of points.
+        tuple:The image with labels and a list of points.
     """
     img = cv2.imread(jpg_path)
     txt = osp.splitext(jpg_path)[0] + ".txt"
     with open(txt, "r") as fo:
         lines = fo.readlines()
     img, pts = show_yolo_label(img, lines, xywh, classes, colors, thickness)
-    img = put_text(img, osp.basename(jpg_path))
+    # img = cv2.copyMakeBorder(img, 40, 0, 0, 0, cv2.BORDER_CONSTANT, (0, 0, 0))
+    img = put_text(img, jpg_path)
     return img, pts
 
 
@@ -1858,11 +1874,11 @@ def estimate_norm(landmarks, image_size=112):
     """Estimates the normalization transformation matrix for given landmarks.
 
     Args:
-        landmarks (numpy.ndarray): Array of shape (5, 2) containing the facial landmarks.
-        image_size (int, optional): Size of the output image. Defaults to 112.
+        landmarks (numpy.ndarray):Array of shape (5, 2) containing the facial landmarks.
+        image_size (int, optional):Size of the output image. Defaults to 112.
 
     Returns:
-        numpy.ndarray: The 2x3 transformation matrix.
+        numpy.ndarray:The 2x3 transformation matrix.
     """
     from skimage import transform as trans
     arcface_dst = np.array(
@@ -1900,12 +1916,12 @@ def norm_crop(img, landmarks, image_size=112):
     """Normalizes and crops an image based on facial landmarks.
 
     Args:
-        img (numpy.ndarray): The input image.
-        landmarks (numpy.ndarray): Array of shape (5, 2) containing the facial landmarks.
-        image_size (int, optional): Size of the output image. Defaults to 112.
+        img (numpy.ndarray):The input image.
+        landmarks (numpy.ndarray):Array of shape (5, 2) containing the facial landmarks.
+        image_size (int, optional):Size of the output image. Defaults to 112.
 
     Returns:
-        tuple: The warped image and the transformation matrix.
+        tuple:The warped image and the transformation matrix.
     """
     transformation_matrix = estimate_norm(landmarks, image_size)
     warped_image = cv2.warpAffine(img, transformation_matrix, (image_size, image_size), borderValue=0.0)
@@ -1917,14 +1933,14 @@ def warp_face(img, x1, y1, x2, y2):
     """Warps a face in an image based on bounding box coordinates.
 
     Args:
-        img (numpy.ndarray): The input image.
-        x1 (int): The x-coordinate of the top-left corner of the bounding box.
-        y1 (int): The y-coordinate of the top-left corner of the bounding box.
-        x2 (int): The x-coordinate of the bottom-right corner of the bounding box.
-        y2 (int): The y-coordinate of the bottom-right corner of the bounding box.
+        img (numpy.ndarray):The input image.
+        x1 (int):The x-coordinate of the top-left corner of the bounding box.
+        y1 (int):The y-coordinate of the top-left corner of the bounding box.
+        x2 (int):The x-coordinate of the bottom-right corner of the bounding box.
+        y2 (int):The y-coordinate of the bottom-right corner of the bounding box.
 
     Returns:
-        numpy.ndarray: The warped image.
+        numpy.ndarray:The warped image.
     """
     center_x, center_y, face_width, face_height = xyxy2xywh([x1, y1, x2, y2]).flatten().astype(int)
     scale = 256 / (max(face_width, face_height) * 1.5)
@@ -1935,14 +1951,14 @@ def transform(data, center, output_size, scale, rotation):
     """Applies a series of transformations to the input data.
 
     Args:
-        data (numpy.ndarray): The input image data.
-        center (tuple): The center point for the transformation.
-        output_size (int): The size of the output image.
-        scale (float): The scaling factor.
-        rotation (float): The rotation angle in degrees.
+        data (numpy.ndarray):The input image data.
+        center (tuple):The center point for the transformation.
+        output_size (int):The size of the output image.
+        scale (float):The scaling factor.
+        rotation (float):The rotation angle in degrees.
 
     Returns:
-        tuple: The transformed image and the transformation matrix.
+        tuple:The transformed image and the transformation matrix.
     """
     from skimage import transform as trans
     scale_ratio = scale
@@ -1968,11 +1984,11 @@ def transform_points_2d(points, transformation_matrix):
     """Transforms 2D points using a given transformation matrix.
 
     Args:
-        points (numpy.ndarray): Array of shape (N, 2) containing the 2D points.
-        transformation_matrix (numpy.ndarray): The 2x3 transformation matrix.
+        points (numpy.ndarray):Array of shape (N, 2) containing the 2D points.
+        transformation_matrix (numpy.ndarray):The 2x3 transformation matrix.
 
     Returns:
-        numpy.ndarray: Array of transformed 2D points.
+        numpy.ndarray:Array of transformed 2D points.
     """
     transformed_points = np.zeros(shape=points.shape, dtype=np.float32)
     for i in range(points.shape[0]):
@@ -1988,11 +2004,11 @@ def transform_points_3d(points, transformation_matrix):
     """Transforms 3D points using a given transformation matrix.
 
     Args:
-        points (numpy.ndarray): Array of shape (N, 3) containing the 3D points.
-        transformation_matrix (numpy.ndarray): The 2x3 transformation matrix.
+        points (numpy.ndarray):Array of shape (N, 3) containing the 3D points.
+        transformation_matrix (numpy.ndarray):The 2x3 transformation matrix.
 
     Returns:
-        numpy.ndarray: Array of transformed 3D points.
+        numpy.ndarray:Array of transformed 3D points.
     """
     scale = np.sqrt(transformation_matrix[0][0] ** 2 + transformation_matrix[0][1] ** 2)
     transformed_points = np.zeros(shape=points.shape, dtype=np.float32)
@@ -2011,12 +2027,12 @@ def pixel_to_camera_3d(pt_2d, depth, camera_matrix):
     """Converts 2D pixel coordinates to 3D camera coordinates.
 
     Args:
-        pt_2d (tuple): The (u, v) coordinates in the distorted image.
-        depth (float or numpy.ndarray): The depth value or depth map.
-        camera_matrix (numpy.ndarray): The camera intrinsic matrix.
+        pt_2d (tuple):The (u, v) coordinates in the distorted image.
+        depth (float or numpy.ndarray):The depth value or depth map.
+        camera_matrix (numpy.ndarray):The camera intrinsic matrix.
 
     Returns:
-        tuple: The 3D camera coordinates and the depth value.
+        tuple:The 3D camera coordinates and the depth value.
     """
     if np.ndim(depth) > 1:
         x, y = map(int, pt_2d)
@@ -2037,12 +2053,12 @@ def pixel_to_camera_3d_numpy(p_uv, depth, camera_matrix):
     """Converts 2D pixel coordinates to 3D camera coordinates using NumPy.
 
     Args:
-        p_uv (numpy.ndarray): Array of shape (N, 2) containing the 2D pixel coordinates.
-        depth (numpy.ndarray or float): Array of shape (N,) containing the depth values or a single depth value.
-        camera_matrix (numpy.ndarray): The 3x3 camera intrinsic matrix.
+        p_uv (numpy.ndarray):Array of shape (N, 2) containing the 2D pixel coordinates.
+        depth (numpy.ndarray or float):Array of shape (N,) containing the depth values or a single depth value.
+        camera_matrix (numpy.ndarray):The 3x3 camera intrinsic matrix.
 
     Returns:
-        tuple: The 3D camera coordinates (N, 3) and the depth values (N,).
+        tuple:The 3D camera coordinates (N, 3) and the depth values (N,).
     """
     if np.ndim(depth) == 2:
         indices = np.reshape(p_uv, (-1, 2)).astype(int)
@@ -2051,7 +2067,7 @@ def pixel_to_camera_3d_numpy(p_uv, depth, camera_matrix):
     u_distorted, v_distorted = np.split(p_uv, 2, axis=-1)
     homogeneous_uv1 = np.stack([u_distorted, v_distorted, np.ones_like(u_distorted)], axis=1)  # [N, 3, 1]
     camera_xy1 = np.matmul(np.linalg.inv(camera_matrix), homogeneous_uv1)[..., 0]  # [N, 3, 1]
-    camera_xyz = camera_xy1 * depth[:, None]  # depth shape: (N,)
+    camera_xyz = camera_xy1 * depth[:, None]  # depth shape:(N,)
 
     return camera_xyz, depth
 
@@ -2060,16 +2076,16 @@ def draw_gaze(image, start, pitch_yaw, length, thickness=1, color=(0, 0, 255), i
     """Draws the gaze angle on the given image based on eye positions.
 
     Args:
-        image (numpy.ndarray): The input image.
-        start (tuple): The starting (x, y) coordinates for the gaze line.
-        pitch_yaw (tuple): The pitch and yaw angles.
-        length (int): The length of the gaze line.
-        thickness (int, optional): The thickness of the gaze line. Defaults to 1.
-        color (tuple, optional): The color of the gaze line in BGR format. Defaults to (0, 0, 255).
-        is_degree (bool, optional): Whether the pitch and yaw are in degrees. Defaults to False.
+        image (numpy.ndarray):The input image.
+        start (tuple):The starting (x, y) coordinates for the gaze line.
+        pitch_yaw (tuple):The pitch and yaw angles.
+        length (int):The length of the gaze line.
+        thickness (int, optional):The thickness of the gaze line. Defaults to 1.
+        color (tuple, optional):The color of the gaze line in BGR format. Defaults to (0, 0, 255).
+        is_degree (bool, optional):Whether the pitch and yaw are in degrees. Defaults to False.
 
     Returns:
-        tuple: The image with the gaze line drawn and the angle in degrees.
+        tuple:The image with the gaze line drawn and the angle in degrees.
     """
     if is_degree:
         pitch_yaw = np.deg2rad(pitch_yaw)
@@ -2102,19 +2118,19 @@ def gaze_3d_to_2d(gaze_3d, transformation_matrix=None):
     """Converts 3D gaze vector to 2D pitch and yaw angles.
 
     Args:
-        gaze_3d (numpy.ndarray): The 3D gaze vector.
-        transformation_matrix (numpy.ndarray, optional): The transformation matrix. Defaults to None.
+        gaze_3d (numpy.ndarray):The 3D gaze vector.
+        transformation_matrix (numpy.ndarray, optional):The transformation matrix. Defaults to None.
 
     Returns:
-        tuple: The pitch and yaw angles in degrees.
+        tuple:The pitch and yaw angles in degrees.
     """
     if transformation_matrix is not None:
         gaze_3d = np.dot(transformation_matrix, gaze_3d)
 
     gaze_3d = gaze_3d / np.linalg.norm(gaze_3d)
     dx, dy, dz = gaze_3d
-    pitch = np.rad2deg(np.arcsin(-dy))  # -dy: Up is positive
-    yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx: Left is positive
+    pitch = np.rad2deg(np.arcsin(-dy))  # -dy:Up is positive
+    yaw = np.rad2deg(np.arctan(-dx / (dz + 1e-7)))  # -dx:Left is positive
 
     return pitch, yaw
 
@@ -2123,12 +2139,12 @@ def gaze_2d_to_3d(pitch, yaw, is_degree=True):
     """Converts 2D pitch and yaw angles to a 3D gaze vector.
 
     Args:
-        pitch (float or numpy.ndarray): The pitch angle.
-        yaw (float or numpy.ndarray): The yaw angle.
-        is_degree (bool, optional): Whether the angles are in degrees. Defaults to True.
+        pitch (float or numpy.ndarray):The pitch angle.
+        yaw (float or numpy.ndarray):The yaw angle.
+        is_degree (bool, optional):Whether the angles are in degrees. Defaults to True.
 
     Returns:
-        numpy.ndarray: The 3D gaze vector.
+        numpy.ndarray:The 3D gaze vector.
     """
     if is_degree:
         pitch = np.deg2rad(pitch)
@@ -2150,11 +2166,11 @@ def cosine_similarity_deg(a, b):
     """Calculates the cosine similarity between two vectors and returns the angle in degrees.
 
     Args:
-        a (numpy.ndarray): First input vector of shape (N, D).
-        b (numpy.ndarray): Second input vector of shape (N, D).
+        a (numpy.ndarray):First input vector of shape (N, D).
+        b (numpy.ndarray):Second input vector of shape (N, D).
 
     Returns:
-        numpy.ndarray: Array of angles in degrees between the input vectors.
+        numpy.ndarray:Array of angles in degrees between the input vectors.
     """
     a_normalized = a / np.linalg.norm(a, axis=1, keepdims=True)
     b_normalized = b / np.linalg.norm(b, axis=1, keepdims=True)
@@ -2170,11 +2186,11 @@ def compute_euler(rotation_vector, translation_vector):
     """Computes Euler angles from a rotation vector.
 
     Args:
-        rotation_vector (numpy.ndarray): The rotation vector.
-        translation_vector (numpy.ndarray): The translation vector.
+        rotation_vector (numpy.ndarray):The rotation vector.
+        translation_vector (numpy.ndarray):The translation vector.
 
     Returns:
-        numpy.ndarray: The Euler angles (pitch, yaw, roll) in degrees.
+        numpy.ndarray:The Euler angles (pitch, yaw, roll) in degrees.
     """
     rvec_matrix = cv2.Rodrigues(rotation_vector)[0]
     proj_matrix = np.hstack((rvec_matrix, translation_vector))
@@ -2192,10 +2208,10 @@ class NormalWarp:
         """Initializes the NormalWarp class.
 
         Args:
-            camera_matrix (numpy.ndarray): The camera intrinsic matrix.
-            distortion_coeffs (numpy.ndarray): The camera distortion coefficients.
-            distance_norm (float): Normalized distance between eye and camera.
-            focal_norm (float): Focal length of the normalized camera.
+            camera_matrix (numpy.ndarray):The camera intrinsic matrix.
+            distortion_coeffs (numpy.ndarray):The camera distortion coefficients.
+            distance_norm (float):Normalized distance between eye and camera.
+            focal_norm (float):Focal length of the normalized camera.
         """
         self.camera_matrix = camera_matrix
         self.distortion_coeffs = distortion_coeffs
@@ -2220,11 +2236,11 @@ class NormalWarp:
         """Estimates the head pose from facial landmarks.
 
         Args:
-            landmarks (numpy.ndarray): Array of shape (N, 2) containing the facial landmarks.
-            iterate (bool, optional): Whether to further optimize the pose estimation. Defaults to True.
+            landmarks (numpy.ndarray):Array of shape (N, 2) containing the facial landmarks.
+            iterate (bool, optional):Whether to further optimize the pose estimation. Defaults to True.
 
         Returns:
-            tuple: Rotation vector, translation vector, and Euler angles.
+            tuple:Rotation vector, translation vector, and Euler angles.
         """
         landmarks = np.reshape(landmarks, (-1, 2))
         _, rotation_vector, translation_vector = cv2.solvePnP(
@@ -2243,11 +2259,11 @@ class NormalWarp:
         """Normalizes and warps the face in the image based on facial landmarks.
 
         Args:
-            image (numpy.ndarray): The input image.
-            landmarks (numpy.ndarray): Array of shape (N, 2) containing the facial landmarks.
+            image (numpy.ndarray):The input image.
+            landmarks (numpy.ndarray):Array of shape (N, 2) containing the facial landmarks.
 
         Returns:
-            tuple: The warped face image, rotation matrix, and warp matrix.
+            tuple:The warped face image, rotation matrix, and warp matrix.
         """
         rotation_vector, translation_vector, _ = self.estimate_head_pose(landmarks)
 
