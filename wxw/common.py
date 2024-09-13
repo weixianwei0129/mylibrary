@@ -270,7 +270,7 @@ def xywh2xyxy(pts):
     y2 = cy + h / 2
     res = np.concatenate([x1, y1, x2, y2], axis=1)
     res = np.clip(res, 0, np.inf)
-    return np.squeeze(res)
+    return res
 
 
 def xyxy2xywh(pts):
@@ -557,8 +557,9 @@ def merge_path(path, flag, ignore=None):
     path_parts = path.split(os.sep)
     flag_index = path_parts.index(flag)
     path_parts = path_parts[flag_index:]
-    for i, x in enumerate(ignore):
-        path_parts.pop(x + i)
+    l = len(path_parts)
+    ignore = [x % l for x in ignore]
+    path_parts = [x for i, x in enumerate(path_parts) if i not in ignore]
     return '_'.join(path_parts)
 
 
@@ -1684,11 +1685,16 @@ def create_labelme_shape(label: str, points, shape_type: str):
 def update_labelme_shape_label(js, convert):
     info = json.load(open(js, 'r'))
     shapes = info.get('shapes', [])
-    for i in range(len(shapes)):
-        label = shapes[i]['label']
+    new_shape = []
+    for shape in shapes:
+        label = shape['label']
         if label in convert:
-            shapes[i]['label'] = convert[label]
-    info['shapes'] = shapes
+            new_label = convert[label]
+            if new_label is None:
+                continue
+            shape['label'] = new_label
+        new_shape.append(shape)
+    info['shapes'] = new_shape
     json.dump(info, open(js, 'w'))
 
 
@@ -1742,13 +1748,18 @@ def compute_polygon_from_mask(mask, debug=False):
     return polygons
 
 
-def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
+def parse_json(
+        path, to_polygon=False, to_rectangle=False,
+        return_dict=False, ignore=None
+) -> [list, np.ndarray, str]:
     """Parses a JSON file and extracts image and shape information.
 
     Args:
         path (str):Path to the JSON file.
-        polygon (bool):Whether to convert points to polygon format.
+        to_polygon (bool):Whether to convert points to polygon format.
         return_dict (bool, optional):Whether to return a dictionary of objects. Defaults to False.
+        to_rectangle (bool, optional):Whether to return a dictionary of objects. Defaults to False.
+        ignore (str, optional):Whether to draw ingore on image. Defaults to False.
 
     Returns:
         tuple:A tuple containing a list or dictionary of LabelObject instances, the image, and the basename.
@@ -1775,10 +1786,10 @@ def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
         obj.label = shape.get("label", None)
         pts = shape.get("points", [])
         obj.ori_pts = np.reshape(pts, (-1, 2)).astype(int)
-        if polygon and len(pts) == 2:
+        if to_polygon and len(pts) == 2:
             x1, y1, x2, y2 = np.array(pts).flatten()
             pts = np.array([x1, y1, x2, y1, x2, y2, x1, y2])
-        if not polygon and len(pts) > 3:
+        if to_rectangle and len(pts) > 2:
             pts = get_min_rect(pts).flatten()[:4]
         obj.pts = np.reshape(pts, (-1, 2))
         obj.type = shape.get("shape_type", "")
@@ -1786,6 +1797,16 @@ def parse_json(path, polygon, return_dict=False) -> [list, np.ndarray, str]:
         obj.width = image_width
         obj_list.append(obj)
         # =====processed=======
+        if obj.label == ignore:
+            if obj.type == 'polygon':
+                contours = np.reshape(obj.pts, (-1, 1, 2)).astype(int)
+                cv2.drawContours(img, [contours], -1, (127.5, 127.5, 127.5), -1)
+            elif obj.type == 'rectangle':
+                x1, y1, x2, y2 = obj.pts.astype(int).flatten()
+                cv2.rectangle(img, (x1, y1), (x2, y2), (127.5, 127.5, 127.5), -1)
+            else:
+                print(f"未知的 ignore 标签， 标签类型为：{obj.type}")
+
         obj.pts_normed = np.reshape(obj.pts, [-1, 2]) / np.array(
             [image_width, image_height]
         )
@@ -1827,11 +1848,11 @@ def show_yolo_label(img, lines, xywh=True, classes: dict = None, colors=None, th
         if xywh:
             x1, y1, x2, y2 = (
                     xywh2xyxy([a, b, c, d]) * np.array([width, height, width, height])
-            ).astype(int)
+            ).astype(int)[0]
         else:
             x1, y1, x2, y2 = (
                     np.array([a, b, c, d]) * np.array([width, height, width, height])
-            ).astype(int)
+            ).astype(int)[0]
 
         if thickness == -1:
             mask = cv2.rectangle(mask, (x1, y1), (x2, y2), colors[idx], thickness)

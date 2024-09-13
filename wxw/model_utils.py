@@ -1,3 +1,4 @@
+import gc
 import os
 import math
 import torch
@@ -8,6 +9,11 @@ from collections import defaultdict
 import torch.backends.cudnn as cudnn
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.tensorboard import SummaryWriter
+
+
+def flush():
+    torch.cuda.empty_cache()
+    gc.collect()
 
 
 class LogHistory:
