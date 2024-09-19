@@ -12,5 +12,5 @@ setup(
 
     packages=find_packages(),
     platforms="any",
-    install_requires=["numpy<2.0.0", "opencv-python", "matplotlib", "Pillow", "einops"]
+    install_requires=["numpy<2.0.0", "psutil", "opencv-python", "matplotlib", "Pillow", "einops"]
 )

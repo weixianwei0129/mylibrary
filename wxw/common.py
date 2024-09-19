@@ -2,25 +2,26 @@ import argparse
 import base64
 import hashlib
 import json
-
-import einops
-import torch
-import yaml
 import os
 import os.path as osp
 import random
 import shutil
 import time
-import cv2
-import psutil
-from functools import partial
-from functools import wraps
 from collections import defaultdict
-from typing import Optional, Union, List
+from functools import partial, wraps
+from itertools import count
 from multiprocessing import Pool
+from typing import List, Optional, Union
+
+import cv2
+import einops
 import matplotlib.font_manager as fm
 import matplotlib.pylab as plt
 import numpy as np
+import psutil
+import pyautogui
+import torch
+import yaml
 from PIL import Image, ImageDraw, ImageFont
 from PIL import __version__ as pl_version
 
@@ -2316,3 +2317,76 @@ class NormalWarp:
 
         face_image = cv2.warpPerspective(image, warp_matrix, self.roi_size)
         return face_image, rotation_matrix, warp_matrix
+
+
+# ===========屏幕截图方式================
+
+def get_timestamp():
+    # 获取当前时间
+    now = datetime.now()
+    # 格式化时间戳
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    return timestamp
+
+
+def get_utc_timestamp():
+    # 获取当前UTC时间
+    utc_now = datetime.utcnow()
+    return utc_now
+
+
+def select_region(image=None):
+    if image is None:
+        image = capture_screen_as_numpy()
+    height, width = image.shape[:2]
+    region = []
+
+    def select_rectangle(event, x, y, flags, param):
+        nonlocal region
+        image_copy = image.copy()
+        if event == cv2.EVENT_LBUTTONDOWN:
+            region = [(x, y)]
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if len(region) == 1:
+                cv2.rectangle(image_copy, region[0], (x, y), (0, 255, 0), 2)
+                cv2.imshow("Image", image_copy)
+        elif event == cv2.EVENT_LBUTTONUP:
+            region.append((x, y))
+            cv2.rectangle(image_copy, region[0], region[1], (0, 255, 0), 2)
+            cv2.imshow("Image", image_copy)
+
+    while True:
+        cv2.namedWindow("Image")
+        cv2.setMouseCallback("Image", select_rectangle)
+        key = imshow("Image", image)
+        if key == ord('q') and len(region) == 2:
+            x1, y1 = region[0]
+            x2, y2 = region[1]
+            cv2.destroyAllWindows()
+            return x1 / width, y1 / height, x2 / width, y2 / height
+        return None
+
+
+def capture_screen_as_numpy():
+    # 获取屏幕截图
+    screenshot = pyautogui.screenshot()
+    # 将截图转换为numpy数组
+    frame = np.array(screenshot)
+    # 将RGB格式转换为BGR格式（OpenCV使用BGR格式）
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    return frame
+
+
+def screen_capture(region=None):
+    if region is None:
+        region = select_region()
+    for ci in count():
+        screen_width, screen_height = pyautogui.size()
+        left = int(region[0] * screen_width)
+        top = int(region[1] * screen_height)
+        width = int((region[2] - region[0]) * screen_width)
+        height = int((region[3] - region[1]) * screen_height)
+        screenshot = pyautogui.screenshot(region=(left, top, width, height))
+        frame = np.array(screenshot)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        yield (ci, frame, get_utc_timestamp())
