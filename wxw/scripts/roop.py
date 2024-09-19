@@ -5,7 +5,7 @@ import pdb
 import os
 import numpy as np
 from numpy.linalg import norm as l2norm
-import common as cm
+import wxw.common as cm
 
 
 # np.random.seed(123456)
