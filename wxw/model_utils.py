@@ -1,11 +1,12 @@
 import gc
 import os
 import math
-import torch
 import random
+from collections import defaultdict
+
+import torch
 import numpy as np
 from torch import nn
-from collections import defaultdict
 import torch.backends.cudnn as cudnn
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.tensorboard import SummaryWriter

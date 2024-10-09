@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='wxw',
-    version='1.0.2-dev',
+    version='1.0.3-dev',
     keywords=['pip', 'wxw'],
     description='A library for wxw',
     long_description="Includes some ways to work with pictures, add qt utils",
@@ -12,5 +12,5 @@ setup(
 
     packages=find_packages(),
     platforms="any",
-    install_requires=["numpy<2.0.0", "psutil", "opencv-python", "matplotlib", "Pillow", "einops"]
+    install_requires=["numpy<2.0.0", "psutil", "opencv-python", "matplotlib", "Pillow", "einops", "PyYaml"]
 )

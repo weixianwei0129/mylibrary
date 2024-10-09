@@ -1,21 +1,19 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-import argparse
 import os
 import re
-import sys
-import urllib
+import time
 import json
 import socket
-import urllib.request
+import urllib
+import argparse
 import urllib.parse
 import urllib.error
-# 设置超时
-import time
+import urllib.request
+
 from tqdm import tqdm
 
-timeout = 5
-socket.setdefaulttimeout(timeout)
+socket.setdefaulttimeout(timeout=5)
 
 
 class Crawler:

@@ -1,10 +1,11 @@
+import os
+import glob
+
 import cv2
 import insightface
-import glob
-import pdb
-import os
 import numpy as np
 from numpy.linalg import norm as l2norm
+
 import wxw.common as cm
 
 

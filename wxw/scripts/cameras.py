@@ -1,11 +1,14 @@
 import os
+import os.path as osp
+
 import cv2
 import glob
 import numpy as np
+
 import wxw.common as cm
 
 
-def collect():
+def collect(path=0, flip=False, output_dir='process'):
     """Capture video frames and save them as images.
 
     This function captures video frames from the default camera, displays them,
@@ -16,10 +19,8 @@ def collect():
 
     The saved images are stored in the 'process' directory.
     """
-    output_dir = 'process'
     os.makedirs(output_dir, exist_ok=True)
-
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(path)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
@@ -30,7 +31,8 @@ def collect():
             break
 
         # Flip the frame horizontally
-        frame = frame[:, ::-1, :]
+        if flip:
+            frame = frame[:, ::-1, :]
 
         # Get frame dimensions
         height, width = frame.shape[:2]
@@ -39,8 +41,8 @@ def collect():
         display_frame = frame.copy()
 
         # Add frame dimensions text to the display frame
-        info_text = f"{height}x{width}"
-        display_frame = cm.put_text(display_frame, info_text, (0, 0), bg_color=-1)
+        info_text = f"{height}x{width}@saved{frame_index}"
+        display_frame = cm.put_text(display_frame, info_text, (0, 0), background_color=-1)
 
         # Show the frame
         cv2.imshow("Frame", display_frame)
@@ -49,7 +51,7 @@ def collect():
         key = cv2.waitKey(1)
         if key in [ord("s"), ord(" ")]:
             # Save the current frame
-            image_path = os.path.join(output_dir, f"{frame_index}.png")
+            image_path = osp.join(output_dir, f"{frame_index}.png")
             cm.imwrite(image_path, frame)
             frame_index += 1
             print(f"Saved frame {frame_index}")
@@ -135,6 +137,53 @@ def calibrate_single_camera(pattern, height, width, cols, rows, wait_key=-1):
     print('=' * 40)
 
     return ret, mtx, dist, rvecs, tvecs
+
+
+def video2images(args):
+    """Extract frames from videos and save them as images.
+
+    Args:
+        args (list): A list containing the thread index and a list of video paths.
+
+    Example:
+        if __name__ == "__main__":
+            pattern = "xxx/*/*/*.mp4"
+            all_data = glob.glob(pattern)
+            print("total: ", len(all_data))
+            cm.multi_process(video2images, all_data, num_threads=4)
+    """
+    thread_idx, all_videos = args
+    print(f"{thread_idx} processing ", len(all_videos))
+
+    for video in all_videos:
+        folder = osp.splitext(video)[0]
+        saved = 0
+
+        if osp.exists(folder):
+            saved = len(glob.glob(osp.join(folder, "*.png")))
+        else:
+            os.makedirs(folder, exist_ok=True)
+
+        cap = cv2.VideoCapture(video)
+        index = 0
+        ret, frame = cap.read()
+
+        while ret:
+            if index < saved:
+                ret, frame = cap.read()
+                index += 1
+                continue
+
+            if index % 1 == 0:
+                new_path = osp.join(folder, f"{str(index).zfill(5)}.png")
+                cv2.imwrite(new_path, frame)
+
+            index += 1
+            ret, frame = cap.read()
+
+        cap.release()
+
+    print(f"{thread_idx} Finished!")
 
 
 if __name__ == '__main__':

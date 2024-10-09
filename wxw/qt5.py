@@ -1,4 +1,5 @@
 import os
+
 import cv2
 try:
     os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH")

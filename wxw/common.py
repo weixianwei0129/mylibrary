@@ -1,35 +1,36 @@
-import argparse
-import base64
-import hashlib
-import json
 import os
-import os.path as osp
-import random
-import shutil
 import time
-from collections import defaultdict
-from functools import partial, wraps
+import json
+import shutil
+import base64
+import random
+import hashlib
+import argparse
+import os.path as osp
 from itertools import count
 from multiprocessing import Pool
+from collections import defaultdict
+from functools import partial, wraps
 from typing import List, Optional, Union
 
 import cv2
-import einops
-import matplotlib.font_manager as fm
-import matplotlib.pylab as plt
-import numpy as np
-import psutil
-import pyautogui
-import torch
 import yaml
-from PIL import Image, ImageDraw, ImageFont
+import torch
+import psutil
+import numpy as np
+import matplotlib.pylab as plt
+import matplotlib.font_manager as fm
 from PIL import __version__ as pl_version
+from PIL import Image, ImageDraw, ImageFont
 
 # Set random seeds for reproducibility
 np.random.seed(123456)
 random.seed(123456)
+
+# ===============unit===============
 MB_UNIT = 1 << 20
 GB_UNIT = 1 << 30
+NUM_THREADS = min(8, max(1, os.cpu_count() - 1))
 
 
 # =============基础方法===============
@@ -107,8 +108,22 @@ def print_format(string: str, a: float, func: str, b: float) -> float:
     if func == '/':
         b += 1e-4  # Avoid division by zero
     c = eval(f"{a} {func} {b}")
-    print(f"{string:<20}:{formatted_string} = {c:.3f}")
+    print(f"{string:<10}:{formatted_string} = {c:.3f}")
     return c
+
+
+def export_args(args):
+    data = vars(args)
+    keys = sorted(list(data))
+    lines = []
+    for key in keys:
+        value = data[key]
+        flag = '# ' if not value else ''
+        if isinstance(value, str):
+            value = f"'{value}'"
+        lines.append(f"{flag}{key}: {value}")
+    for line in lines:
+        print(line)
 
 
 def update_args(old_, new_) -> argparse.Namespace:
@@ -251,6 +266,20 @@ def cost_time(func):
         return result
 
     return wrapper
+
+
+class cost_time2:
+    def __init__(self, name=''):
+        self.name = name
+
+    def __enter__(self):
+        self.start_time = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end_time = time.perf_counter()
+        self.elapsed_time = self.end_time - self.start_time
+        print(f'{self.name} executed in {self.elapsed_time:.4f}s')
 
 
 def xywh2xyxy(pts):
@@ -404,7 +433,7 @@ def multi_process(process_method, data_to_process, num_threads=1):
         multi_process(process_method, data_to_process, num_threads=4)
     """
     if num_threads == 1:
-        process_method([0, data_to_process])
+        results = [process_method([0, data_to_process])]
     else:
         total = len(data_to_process)
         interval = int(np.ceil(total / num_threads))
@@ -416,7 +445,8 @@ def multi_process(process_method, data_to_process, num_threads=1):
             tasks.append([i, data_to_process[start:end]])
 
         with Pool(num_threads) as pool:
-            pool.map(process_method, tasks)
+            results = pool.map(process_method, tasks)
+    return results
 
 
 def simplify_number(decimal):
@@ -2368,6 +2398,7 @@ def select_region(image=None):
 
 
 def capture_screen_as_numpy():
+    import pyautogui
     # 获取屏幕截图
     screenshot = pyautogui.screenshot()
     # 将截图转换为numpy数组
