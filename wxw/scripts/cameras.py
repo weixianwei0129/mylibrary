@@ -4,8 +4,9 @@ import os.path as osp
 import cv2
 import glob
 import numpy as np
-
+from tqdm import tqdm
 import wxw.common as cm
+from multiprocessing.pool import ThreadPool
 
 
 def collect(path=0, flip=False, output_dir='process'):
@@ -184,6 +185,36 @@ def video2images(args):
         cap.release()
 
     print(f"{thread_idx} Finished!")
+
+
+def multi_video2images(all_videos, interval=1):
+    total = len(all_videos)
+    print("total: ", total)
+
+    def do(idx):
+        video = all_videos[idx]
+        folder = osp.splitext(video)[0]
+
+        saved = 0
+        if osp.exists(folder):
+            saved = len(glob.glob(osp.join(folder, "*.png")))
+
+        cap = cv2.VideoCapture(video)
+
+        index = 0
+        ret, frame = cap.read()
+        while ret:
+            index += 1
+            if index > saved and index % interval == 0:
+                new_path = osp.join(folder, f"{str(index).zfill(5)}.png")
+                cm.imwrite(new_path, frame)
+            ret, frame = cap.read()
+        cap.release()
+
+    with ThreadPool(cm.NUM_THREADS) as pool:
+        with tqdm(pool.imap_unordered(do, range(total)), total=total) as pbar:
+            for _ in pbar:
+                pass
 
 
 if __name__ == '__main__':

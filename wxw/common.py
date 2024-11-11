@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import glob
 import shutil
 import base64
 import random
@@ -8,6 +9,7 @@ import hashlib
 import argparse
 import os.path as osp
 from itertools import count
+from datetime import datetime
 from multiprocessing import Pool
 from collections import defaultdict
 from functools import partial, wraps
@@ -268,7 +270,7 @@ def cost_time(func):
     return wrapper
 
 
-class cost_time2:
+class cost_time_scope:
     def __init__(self, name=''):
         self.name = name
 
@@ -571,12 +573,13 @@ class ControlKey:
 
 
 # =========Files:文件移动和写入============
-def merge_path(path, flag, ignore=None):
+def merge_path(path, flag, interval='_', ignore=None):
     """Merge a path from a specific flag.
 
     Args:
         path (str):The original path.
         flag (str):The flag to start merging from.
+        interval (str):
         ignore (list):Ignore parts
 
     Returns:
@@ -591,7 +594,7 @@ def merge_path(path, flag, ignore=None):
     l = len(path_parts)
     ignore = [x % l for x in ignore]
     path_parts = [x for i, x in enumerate(path_parts) if i not in ignore]
-    return '_'.join(path_parts)
+    return interval.join(path_parts)
 
 
 def move_file_pair(
@@ -626,8 +629,9 @@ def move_file_pair(
     """
     # NOTE:'self_postfix' will be the last part after splitting by '.'
     prefix, self_postfix = osp.splitext(path)
-    if postfixes is None:
+    if postfixes is None or 'self' in postfixes:
         postfixes = [self_postfix]
+    postfixes = list(set(postfixes))
 
     src_dir = osp.dirname(prefix)
     src_name = osp.basename(prefix)
@@ -654,18 +658,19 @@ def move_file_pair(
             dst = osp.join(dst_folder, dst_name + postfix)
             execute_srcs.append([src, dst])
 
-    if len(execute_srcs) != len(postfixes):
-        print(f"warning:[{path}]缺少配对文件")
+    if not ignore_failed and len(execute_srcs) != len(postfixes):
+        print(f"warning:[{path}]缺少配对文件[{execute_srcs}]")
         return
 
     for src, dst in execute_srcs:
         if not execute:
             print(f"[move_file_pair]:{src} -> {dst}")
         else:
-            if overwrite and osp.exists(dst):
+            if osp.exists(dst) and overwrite:
                 os.remove(dst)
+
             if not osp.exists(dst):
-                os.makedirs(dst_folder, exist_ok=True)
+                os.makedirs(osp.dirname(dst), exist_ok=True)
                 try:
                     if copy:
                         shutil.copy(src, dst)
@@ -674,6 +679,8 @@ def move_file_pair(
                 except Exception as e:
                     if not ignore_failed:
                         raise Exception(e)
+                    print(e)
+    return execute_srcs
 
 
 def save_txt_jpg(path, image, content):
@@ -1456,6 +1463,7 @@ def create_image_grid(images, nrow=None, ncol=None):
         np.ndarray:The final image grid.
     """
     assert len(images) > 0, "The images list should not be empty."
+    images = [convert_rgb(x) for x in images]
 
     total = len(images)
 
@@ -1510,7 +1518,16 @@ def create_image_grid(images, nrow=None, ncol=None):
     return img1
 
 
-def concatenate_images(images, axis=None):
+def convert_rgb(image):
+    if image.ndim == 2:
+        image = np.stack([image] * 3, axis=-1)
+
+    if image.dtype != np.uint8:
+        image = norm_for_show(image)
+    return image
+
+
+def concatenate_images(images: list, axis=None):
     """
     Concatenates a list of images into a single image.
 
@@ -1526,7 +1543,7 @@ def concatenate_images(images, axis=None):
         return None
     if len(images) == 1:
         return images[0]
-
+    images = [convert_rgb(x) for x in images]
     height, width = images[0].shape[:2]
     concatenated_images = []
     if not axis:
@@ -1538,12 +1555,6 @@ def concatenate_images(images, axis=None):
         else:
             image = size_pre_process(image, width=width, align=1)
             axis = 0
-
-        if image.ndim == 2:
-            image = np.stack([image] * 3, axis=-1)
-
-        if image.dtype != np.uint8:
-            image = norm_for_show(image)
 
         concatenated_images.append(image)
     try:
@@ -1578,7 +1589,9 @@ def imshow(
         int:The key code pressed during the display, or None if waitKey is not called.
     """
     if isinstance(image, list):
+        image = [convert_rgb(x) for x in image]
         image = concatenate_images(image)
+        # image = create_image_grid(image)
 
     if image is not None:
         if not original_size:
@@ -1613,6 +1626,7 @@ def imwrite(file_path, image, overwrite=True):
         return
     os.makedirs(osp.dirname(file_path), exist_ok=True)
     cv2.imwrite(file_path, image)
+    return osp.abspath(file_path)
 
 
 # ============labelme software==============
@@ -2408,7 +2422,8 @@ def capture_screen_as_numpy():
     return frame
 
 
-def screen_capture(region=None):
+def capture_screen_from_region(region=None):
+    import pyautogui
     if region is None:
         region = select_region()
     for ci in count():
@@ -2421,3 +2436,28 @@ def screen_capture(region=None):
         frame = np.array(screenshot)
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         yield (ci, frame, get_utc_timestamp())
+
+
+# ===============camera ============
+class ImageCapture:
+    def __init__(self, pattern, recursive=True):
+        self.all_path = glob.glob(pattern, recursive=recursive)
+        self.all_path.sort()
+        self.idx = 0
+        self.path = None
+        print(f"collecte {len(self)} frames!")
+
+    def __len__(self):
+        return len(self.all_path)
+
+    def read(self):
+        if self.idx >= len(self):
+            self.path = None
+            return False, None
+        self.path = self.all_path[self.idx]
+        frame = cv2.imread(self.path)
+        self.idx += 1
+        return True, frame
+
+    def isOpened(self):
+        return self.idx < len(self)

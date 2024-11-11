@@ -4,9 +4,11 @@ import os.path as osp
 
 import cv2
 from tqdm import tqdm
-
 import wxw.common as cm
-from wxw.scripts.cameras import collect, calibrate_single_camera, video2images
+from wxw.scripts.cameras import (
+    collect, calibrate_single_camera,
+    video2images, multi_video2images,
+)
 
 
 def pack_files(pattern, files_per_folder=500, being=0, sort_method=None, **kwargs):
