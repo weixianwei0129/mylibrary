@@ -886,7 +886,7 @@ def image_info(img, name=None):
         f"values range are [{min_val}, {max_val}], "
         f"dtype is {dtype}, "
         f"on {device} device.\n"
-        f"unique:{unique_values_str}"
+        f"unique: [{unique_values_str}]"
         f"\n{'-' * 100}\n"
     )
 
@@ -975,6 +975,30 @@ def random_pad_image(image, target_size, border_type=cv2.BORDER_CONSTANT, border
     return pad_image(
         padded_image, target_size, center=False, border_type=border_type, value=border_value
     )
+
+
+def crop_region(image, region):
+    """Crops a region from an image.
+
+    This function takes an image and a region specified by normalized coordinates,
+    and returns the cropped region of the image along with the pixel coordinates of the region.
+
+    Args:
+        image (numpy.ndarray): The input image from which the region will be cropped.
+        region (list of float): A list of four float values representing the normalized coordinates
+                                of the region to crop in the format [left, right, top, bottom].
+
+    Returns:
+        tuple: A tuple containing:
+            - numpy.ndarray: The cropped region of the image.
+            - list of int: A list of four integer values representing the pixel coordinates
+                           of the cropped region in the format [left, right, top, bottom].
+    """
+    height, width = image.shape[:2]
+    left, right, top, bottom = region
+    left, right = round(left * width), round(right * width)
+    top, bottom = round(top * height), round(bottom * height)
+    return image[top:bottom, left:right, ...], [left, right, top, bottom]
 
 
 def size_pre_process(image, max_length=4096, **kwargs):
@@ -1447,7 +1471,7 @@ def norm_for_show(array):
     Returns:
         numpy.ndarray:The normalized array, scaled to the range [0, 255] and converted to uint8.
     """
-    normalized_array = ((array - np.min(array)) / (np.max(array) - np.min(array)) * 255).astype(np.uint8)
+    normalized_array = ((array - np.min(array)) / (np.max(array) - np.min(array) + 1e-4) * 255).astype(np.uint8)
     return normalized_array
 
 
@@ -1631,22 +1655,6 @@ def imwrite(file_path, image, overwrite=True):
 
 # ============labelme software==============
 
-class LabelObject(object):
-    """Class representing a labeled object with various attributes."""
-
-    def __init__(self):
-        self.type = None
-        self.pts = None
-        self.ori_pts = None
-        self.pts_normed = None
-        self.label = None
-        self.box = None
-        self.height = None
-        self.width = None
-
-    def __str__(self):
-        return f"type:{self.type}, label:{self.label}"
-
 
 def create_labelme_file(png_path, content=None, overwrite=False, labelme_version="5.0.1"):
     """Creates a LabelMe JSON file for the given PNG image.
@@ -1791,6 +1799,23 @@ def compute_polygon_from_mask(mask, debug=False):
         polygons.append(polygon[:, ::-1])
 
     return polygons
+
+
+class LabelObject(object):
+    """Class representing a labeled object with various attributes."""
+
+    def __init__(self):
+        self.type = None
+        self.pts = None
+        self.ori_pts = None
+        self.pts_normed = None
+        self.label = None
+        self.box = None
+        self.height = None
+        self.width = None
+
+    def __str__(self):
+        return f"type:{self.type}, label:{self.label}"
 
 
 def parse_json(
@@ -2380,6 +2405,20 @@ def get_utc_timestamp():
 
 
 def select_region(image=None):
+    """Allows the user to select a rectangular region in an image.
+
+    This function displays an image and allows the user to draw a rectangle by clicking and dragging the mouse.
+    The selected region's coordinates are returned as normalized values.
+
+    Args:
+        image (numpy.ndarray, optional): The input image in which the region is to be selected.
+                                         If None, a screenshot of the screen is captured.
+
+    Returns:
+        tuple: A tuple containing four float values representing the normalized coordinates
+               of the selected region in the format (x1, y1, x2, y2).
+               Returns None if the selection is not completed.
+    """
     if image is None:
         image = capture_screen_as_numpy()
     height, width = image.shape[:2]
@@ -2412,6 +2451,14 @@ def select_region(image=None):
 
 
 def capture_screen_as_numpy():
+    """Captures the entire screen and returns it as a numpy array.
+
+    This function takes a screenshot of the entire screen, converts it to a numpy array,
+    and changes the color format from RGB to BGR.
+
+    Returns:
+        numpy.ndarray: The captured screen image in BGR format.
+    """
     import pyautogui
     # 获取屏幕截图
     screenshot = pyautogui.screenshot()
@@ -2423,6 +2470,22 @@ def capture_screen_as_numpy():
 
 
 def capture_screen_from_region(region=None):
+    """Captures a specified region of the screen and yields it as a numpy array.
+
+    This function captures a specified region of the screen in a loop, converts it to a numpy array,
+    and changes the color format from RGB to BGR. If no region is specified, it prompts the user to select one.
+
+    Args:
+        region (list of float, optional): A list of four float values representing the normalized coordinates
+                                          of the region to capture in the format [left, top, right, bottom].
+                                          If None, the user is prompted to select a region.
+
+    Yields:
+        tuple: A tuple containing:
+            - int: The current iteration count.
+            - numpy.ndarray: The captured region image in BGR format.
+            - float: The current UTC timestamp.
+    """
     import pyautogui
     if region is None:
         region = select_region()
@@ -2440,17 +2503,50 @@ def capture_screen_from_region(region=None):
 
 # ===============camera ============
 class ImageCapture:
+    """Class for capturing images from a specified file pattern.
+
+    This class allows for reading images from a directory based on a given file pattern.
+    It supports recursive searching and provides methods to read images sequentially.
+
+    Attributes:
+        all_path (list of str): Sorted list of all file paths matching the pattern.
+        idx (int): Current index in the list of file paths.
+        path (str or None): Path of the current image being read.
+
+    Methods:
+        __len__(): Returns the total number of images.
+        read(): Reads the next image in the sequence.
+        isOpened(): Checks if there are more images to read.
+    """
+
     def __init__(self, pattern, recursive=True):
+        """Initializes the ImageCapture with a file pattern.
+
+        Args:
+            pattern (str): The file pattern to match image files.
+            recursive (bool): Whether to search directories recursively. Default is True.
+        """
         self.all_path = glob.glob(pattern, recursive=recursive)
         self.all_path.sort()
         self.idx = 0
         self.path = None
-        print(f"collecte {len(self)} frames!")
+        print(f"Collected {len(self)} frames!")
 
     def __len__(self):
+        """Returns the total number of images.
+
+        Returns:
+            int: The number of image files found.
+        """
         return len(self.all_path)
 
     def read(self):
+        """Reads the next image in the sequence.
+
+        Returns:
+            tuple: A tuple containing a boolean indicating if the read was successful,
+                   and the image frame (or None if no more images).
+        """
         if self.idx >= len(self):
             self.path = None
             return False, None
@@ -2460,4 +2556,9 @@ class ImageCapture:
         return True, frame
 
     def isOpened(self):
+        """Checks if there are more images to read.
+
+        Returns:
+            bool: True if there are more images, False otherwise.
+        """
         return self.idx < len(self)
